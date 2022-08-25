@@ -1,4 +1,6 @@
-from trieste.acquisition.interface import AcquisitionFunctionBuilder as TAcquisitionFunctionBuilder
+from trieste.acquisition.interface import (
+    AcquisitionFunctionBuilder as TAcquisitionFunctionBuilder
+)
 
 
 class AcquisitionFunctionBuilder(TAcquisitionFunctionBuilder):
