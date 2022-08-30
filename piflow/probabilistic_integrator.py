@@ -34,13 +34,24 @@ class IntegrandModel():
         :return: Integral mean, scalar; integral standard deviation,
             scalar.
         """
+        posterior = self._model._model.posterior()  # Populate caches.
         if self._integral_mean is None:
-            int_mean = integral_mean(self._prior, self._model)
+            int_mean = integral_mean(
+                self._prior,
+                self._model._model,
+                self._model._model.kernel,  # Included in function signature for multiple dispatch.
+                posterior=posterior
+            )
             self._integral_mean = int_mean
         else:
             int_mean = self._integral_mean
         if self._integral_variance is None:
-            int_variance = integral_variance(self._prior, self._model)
+            int_variance = integral_variance(
+                self._prior,
+                self._model._model,
+                self._model._model.kernel,  # Included in function signature for multiple dispatch.
+                posterior=posterior
+            )
             self._integral_variance = int_variance
         else:
             int_variance = self._integral_variance
@@ -85,8 +96,11 @@ class ProbabilisticIntegrator():
                 model.update(dataset)
                 model.optimize(dataset)
         for step in range(1, num_steps + 1):
+            logger.info(f'PI acquisition {step}/{num_steps}')
             # Make an acquisition.
-            query_points = acquistion_rule.acquire(self._search_space, models, datasets=datasets)
+            query_points = acquistion_rule.acquire(
+                self._search_space, models, datasets=datasets, prior=self._prior
+            )
             observer_output = self._observer(query_points)
             tagged_output = (
                 observer_output
@@ -99,10 +113,8 @@ class ProbabilisticIntegrator():
                 dataset = datasets[tag]
                 model.update(dataset)
                 model.optimize(dataset)
-
         integrand_model = IntegrandModel(self._prior, model)
-        _ = integrand_model.integral_posterior()  # Populate results.
-
+        _ = integrand_model.integral_posterior()  # Populate cache.
         return  integrand_model
 
 
@@ -115,14 +127,17 @@ class ProbabilisticIntegrator():
 def _rbf_gaussian_mean(
     prior: tfp.distributions.MultivariateNormalFullCovariance,
     model: gpflow.models.GPR,
-    kernel: gpflow.kernels.RBF
+    kernel: gpflow.kernels.RBF,
+    posterior: gpflow.posteriors.GPRPosterior = None
 ):
     """Posterior mean over integral for a GP with an RBF kernel against
     a Gaussian prior.
     """
-    raise NotImplementedError
+    posterior = model.posterior() if posterior == None else posterior
+    kernel_integral = tf.reshape(_rbf_gaussian_kernel_integral(prior, model), (1, -1))
+    return tf.squeeze(kernel_integral @ posterior.cache[0] @ model.data[1])
 
-@integral_mean.register(
+@integral_variance.register(
     tfp.distributions.MultivariateNormalFullCovariance,
     gpflow.models.GPR,
     gpflow.kernels.RBF
@@ -130,182 +145,101 @@ def _rbf_gaussian_mean(
 def _rbf_gaussian_var(
     prior: tfp.distributions.MultivariateNormalFullCovariance,
     model: gpflow.models.GPR,
-    kernel: gpflow.kernels.RBF
+    kernel: gpflow.kernels.RBF,
+    posterior: gpflow.posteriors.GPRPosterior = None
 ):
     """Posterior variance over integral for a GP with an RBF kernel
     against a Gaussian prior.
     """
-    raise NotImplementedError
+    posterior = model.posterior() if posterior == None else posterior
+    dbl_kernel_integral = _rbf_gaussian_double_kernel_integral(prior, model)
+    kernel_integral = tf.reshape(_rbf_gaussian_kernel_integral(prior, model), (1, -1))
+    return (
+        dbl_kernel_integral - kernel_integral @ posterior.cache[0] @ tf.transpose(kernel_integral)
+    )
+
+def _rbf_gaussian_kernel_integral(
+    prior: tfp.distributions.MultivariateNormalFullCovariance,
+    model: gpflow.models.GPR,
+) -> tf.Tensor:
+    X, _ = model.data  # [N, D]
+    kernel = model.kernel
+    num_dims = X.shape[1]
+    lengthscales_sq = kernel.lengthscales ** 2 * tf.eye(
+        num_dims, num_dims, dtype=tf.float64
+    )  # [D, D]
+    constant = kernel.variance * tf.sqrt(tf.linalg.det(2 * math.pi * lengthscales_sq))
+    normal_probs = tfp.distributions.MultivariateNormalFullCovariance(
+        loc=prior.loc,
+        covariance_matrix=prior.covariance() + lengthscales_sq
+    ).prob(X)  # [N]
+    return constant * normal_probs  # [N]
+
+def _rbf_gaussian_double_kernel_integral(
+    prior: tfp.distributions.MultivariateNormalFullCovariance,
+    model: gpflow.models.GPR,
+) -> tf.Tensor:
+    X, _ = model.data  # [N, D]
+    kernel = model.kernel
+    num_dims = X.shape[1]
+    lengthscales_sq = kernel.lengthscales ** 2 * tf.eye(
+        num_dims, num_dims, dtype=tf.float64
+    )  # [D, D]
+    constant = kernel.variance * tf.sqrt(tf.linalg.det(2 * math.pi * lengthscales_sq))
+    combined_cov = prior.covariance() + 2 * lengthscales_sq  # [D, D]
+    return constant / tf.sqrt(tf.linalg.det(combined_cov))  # Scalar
 
 
-# WSABI-L, RBF kernel, Gaussian prior ( Warped GP) 
+# WSABI-L, RBF kernel, Gaussian prior
 @integral_mean.register(
     tfp.distributions.MultivariateNormalFullCovariance,
     WSABI_L_GPR,
     gpflow.kernels.RBF
 )
 def _wsabi_mean(
-        prior: tfp.distributions.MultivariateNormal,
+        prior: tfp.distributions.MultivariateNormalFullCovariance,
         model: WSABI_L_GPR,
-        kernel: gpflow.kernels.RBF
+        kernel: gpflow.kernels.RBF,
+        posterior: gpflow.posteriors.GPRPosterior = None
 ) -> tf.Tensor:
     """Mean of posterior over the integral for a WSABI-L GP with an RBF
     kernel and Gaussian prior.
     """
-    # N x 1
-    try:
-        K_DD_z0 = model.prediction_strategy.mean_cache
-    except AttributeError:
-        # Hack to get mean_cache populated.
-        model.eval()
-        mean = tf.tensor([])
-        for p in prior:
-            mean = tf.cat((mean, p.loc.view(-1)), dim=0)
-        model(mean.unsqueeze(0))
-        K_DD_z0 = model.prediction_strategy.mean_cache
-
+    posterior = model.posterior() if posterior == None else posterior
+    K_inv_z = posterior.cache[0] @ model.data[1]  # [N, 1]
     dbl_kernel_integral = _wsabi_double_kernel_integral(prior, model)
-
-    integral_mean = (
-            model.alpha + 0.5 * (K_DD_z0.T @ dbl_kernel_integral @ K_DD_z0)
-    ).item()
-
-    # assert integral_mean >= 0, f'Integral Mean: {integral_mean}'
-
+    integral_mean = tf.squeeze(
+        model.alpha + 0.5 * (tf.transpose(K_inv_z) @ dbl_kernel_integral @ K_inv_z)
+    )
+    assert integral_mean >= 0, f'Integral mean negative ({integral_mean})'
     return integral_mean
 
 
-@integral_mean.register(
+@integral_variance.register(
     tfp.distributions.MultivariateNormalFullCovariance,
     WSABI_L_GPR,
     gpflow.kernels.RBF
 )
 def _wsabi_variance(
-        prior: tfp.distributions.MultivariateNormal,
+        prior: tfp.distributions.MultivariateNormalFullCovariance,
         model: WSABI_L_GPR,
-        kernel: gpflow.kernels.RBF
+        kernel: gpflow.kernels.RBF,
+        posterior: gpflow.posteriors.GPRPosterior = None
 ) -> tf.Tensor:
     """Variance of posterior over the integral for a WSABI-L GP with an
     RBF kernel and Gaussian prior.
     """
-    # N x 1
-    try:
-        K_DD_z0 = model.prediction_strategy.mean_cache
-    except AttributeError:
-        # Hack to get mean_cache populated.
-        model.eval()
-        mean = tf.tensor([])
-        for p in prior:
-            mean = tf.cat((mean, p.loc.view(-1)), dim=0)
-        model(mean.unsqueeze(0))
-        K_DD_z0 = model.prediction_strategy.mean_cache
-
-    K_DD = model.covar_module(model.train_inputs[0])
-    # from gpytf.lazy import DiagLazyTensor
-    # K_DD += DiagLazyTensor(model.likelihood.noise.repeat(K_DD.size(0)))
-
+    posterior = model.posterior() if posterior == None else posterior
+    X, Z = model.data
+    K_inv_z = posterior.cache[0] @ Z  # [N, 1]
     triple_integral = _wsabi_triple_kernel_integral(prior, model)
     double_integral = _wsabi_double_kernel_integral(prior, model)
-
-    prior_term = K_DD_z0.T @ triple_integral @ K_DD_z0
-    correction_term = (
-        K_DD_z0.T
-        @ K_DD.inv_matmul(
-            right_tensor=double_integral, left_tensor=double_integral
-        )
-        @ K_DD_z0
-    )
-
-    integral_variance = (prior_term - correction_term).item()
-    # assert integral_variance >= 0, f'Prior Term: {prior_term.item()}, Correction Term: {correction_term.item()}'
-
+    dbl_int_z = double_integral @ Z
+    prior_term = tf.transpose(K_inv_z) @ triple_integral @ K_inv_z
+    correction_term = tf.transpose(dbl_int_z) @ posterior.cache[0] @ dbl_int_z
+    integral_variance = tf.squeeze(prior_term - correction_term)
+    assert integral_variance >= 0, f'Integral variance negative. Prior term: {prior_term}, correction Term: {correction_term}'
     return integral_variance
-
-
-def _wsabi_kernel_mean(
-        prior: tfp.distributions.MultivariateNormalFullCovariance,
-        model: WSABI_L_GPR,
-        kernel: gpflow.kernels.RBF,
-        X: tf.Tensor
-) -> tf.Tensor:
-    # distribution parameters
-    prior_mean = tf.tensor([])
-    covar = tf.tensor([])
-    for p in prior:
-        prior_mean = tf.cat((prior_mean, p.loc.view(-1)), dim=0)
-        covar = tf.cat((covar, p.scale.view(-1)), dim=0)
-    covar = tf.diag(covar) ** 2
-    # kernel parameters
-    outputscale = model.covar_module.outputscale.squeeze()
-    lengthscale = model.covar_module.base_kernel.lengthscale.squeeze()
-    if lengthscale.numel() == 1:
-        n_dims = prior_mean.size(0)
-        lengthscale = tf.eye(n_dims) * lengthscale ** 2
-    else:
-        lengthscale = tf.diag_embed(lengthscale) ** 2
-
-    # N x D
-    train_inputs = model.train_inputs[0]
-    # M
-    warped_mean = model.warped_posterior(X).mean
-    # N x 1
-    try:
-        K_DD_z0 = model.prediction_strategy.mean_cache
-    except AttributeError:
-        # Hack to get mean_cache populated.
-        model.eval()
-        model(prior_mean.unsqueeze(0))
-        K_DD_z0 = model.prediction_strategy.mean_cache
-    K_DD = model.covar_module(model.train_inputs[0])
-    # from gpytorch.lazy import DiagLazyTensor
-    # K_DD += DiagLazyTensor(model.likelihood.noise.repeat(K_DD.size(0)))
-
-    # Partial_triple_integral
-    constant = outputscale ** 2 * tf.det(lengthscale) / tf.sqrt(
-        tf.det(0.5 * lengthscale + covar) * tf.det(2 * lengthscale)
-    )
-    # M x N x D
-    differences = train_inputs.unsqueeze(0) - X.unsqueeze(1)
-    averages = (train_inputs.unsqueeze(0) + X.unsqueeze(1)) / 2
-    shifted_averages = averages - prior_mean
-    # M x N
-    exp_1 = tf.exp(
-        -0.25 * tf.einsum(
-            'ijk,kl,ijl->ij',
-            differences,
-            tf.inverse(lengthscale),
-            differences
-        )
-    )
-    exp_2 = tf.exp(
-        -0.5 * tf.einsum(
-            'ijk,kl,ijl->ij',
-            shifted_averages,
-            tf.inverse(lengthscale / 2 + covar),
-            shifted_averages
-        )
-    )
-    # M x N
-    half_triple_integral = constant * exp_1 * exp_2
-    assert (half_triple_integral >= 0).all()
-    prior_term_right = half_triple_integral @ K_DD_z0
-    prior_term = warped_mean * prior_term_right
-
-    # N x N
-    dbl_kernel_integral = _wsabi_double_kernel_integral(prior, model)
-    right_vector = dbl_kernel_integral @ K_DD_z0
-    inv_quad = K_DD.inv_matmul(
-        right_tensor=right_vector,
-        left_tensor=model.covar_module(X, train_inputs).evaluate()
-    )
-    correction_term = warped_mean * inv_quad
-
-    # M
-    integral = prior_term - correction_term
-
-    # assert (integral >= 0).all()
-
-    return integral
 
 
 def _wsabi_double_kernel_integral(
@@ -315,48 +249,33 @@ def _wsabi_double_kernel_integral(
     """Integral of k(x, a) * k(x, b) * pi(x) dx for RBF kernel and
     Gaussian prior.
     """
-    # distribution parameters
-    mean = tf.tensor([])
-    covar = tf.tensor([])
-    for p in prior:
-        mean = tf.cat((mean, p.loc.view(-1)), dim=0)
-        covar = tf.cat((covar, p.scale.view(-1)), dim=0)
-    n_dims = mean.size(0)
-    covar = tf.diag(covar) ** 2
-    # # kernel parameters
-    outputscale = model.covar_module.outputscale.squeeze()
-    lengthscale = model.covar_module.base_kernel.lengthscale.squeeze()
-    if lengthscale.numel() == 1:
-        lengthscale = tf.eye(n_dims) * lengthscale ** 2 #/ 2
-    else:
-        lengthscale = tf.diag_embed(lengthscale) ** 2 #/ 2
+    num_dims = prior.loc.shape[0]
+    X, Z = model.data
+    lengthscales_sq = model.kernel.lengthscales ** 2 * tf.eye(
+        num_dims, num_dims, dtype=tf.float64
+    )  # [D, D]
     # D x D
-    combined_covar = covar + lengthscale / 2
-    K_DD = model.covar_module(model.train_inputs[0]).evaluate()
-    constant = outputscale ** 2 * 2 ** (-n_dims / 2) * tf.sqrt(
-        tf.det(lengthscale) / tf.det(combined_covar)
+    combined_covar = prior.covariance() + lengthscales_sq / 2
+    K_DD = model.kernel.K(X, X)
+    constant = model.kernel.variance * 2 ** (-num_dims / 2) * tf.sqrt(
+        tf.linalg.det(lengthscales_sq) / tf.linalg.det(combined_covar)
     )
     # N x N
-    exp_1 = (K_DD / outputscale).log().div(2).exp()
-    X_avg = (
-                    model.train_inputs[0].unsqueeze(1)
-                    + model.train_inputs[0].unsqueeze(0)
-            ) / 2
-    X_avg_offset = (X_avg - mean)
+    exp_1 = tf.exp(tf.math.log(K_DD / tf.sqrt(model.kernel.variance)) / 2)
+    X_avg = (tf.expand_dims(X, 1) + tf.expand_dims(X, 0)) / 2
+    X_avg_offset = X_avg - prior.loc
     # N x N
     exp_2 = tf.exp(
         -0.5 * tf.einsum(
             'ijk,kl,ijl->ij',
             X_avg_offset,
-            tf.inverse(combined_covar),
+            tf.linalg.inv(combined_covar),
             X_avg_offset
         )
     )
-
     # N x N
     integral = constant * exp_1 * exp_2
     # assert (integral >= 0).all()
-
     return integral
 
 
@@ -367,65 +286,50 @@ def _wsabi_triple_kernel_integral(
     """Integral of k(x, a) * k(x, x') * k(x', b) * pi(x) * pi(x') dx dx'
     for RBF kernel and Gaussian prior.
     """
-    # distribution parameters
-    mean = tf.tensor([])
-    covar = tf.tensor([])
-    for p in prior:
-        mean = tf.cat((mean, p.loc.view(-1)), dim=0)
-        covar = tf.cat((covar, p.scale.view(-1)), dim=0)
-    n_dims = mean.size(0)
-    covar = tf.diag(covar) ** 2
-    # # kernel parameters
-    outputscale = model.covar_module.outputscale.squeeze()
-    lengthscale = model.covar_module.base_kernel.lengthscale.squeeze()
-    if lengthscale.numel() == 1:
-        lengthscale = tf.eye(n_dims) * lengthscale ** 2
-    else:
-        lengthscale = tf.diag_embed(lengthscale) ** 2
-
-    covariance_sum = covar + lengthscale
-    inv_covar = covar.inverse()
-    inv_lengthscale = lengthscale.inverse()
-    inv_precision_sum = tf.inverse(inv_covar + inv_lengthscale)
-    combined_covariance = 2 * inv_precision_sum + lengthscale
-
+    num_dims = prior.loc.shape[0]
+    X, Z = model.data
+    lengthscales_sq = model.kernel.lengthscales ** 2 * tf.eye(
+        num_dims, num_dims, dtype=tf.float64
+    )  # [D, D]
+    # Preliminaries.
+    covariance_sum = prior.covariance() + lengthscales_sq
+    inv_covar = tf.linalg.inv(prior.covariance())
+    inv_lengthscale = tf.linalg.inv(lengthscales_sq)
+    inv_precision_sum = tf.linalg.inv(inv_covar + inv_lengthscale)
+    combined_covariance = 2 * inv_precision_sum + lengthscales_sq
+    # Compute components.
     constant = (
-            outputscale ** 3
-            * (2 * math.pi) ** n_dims
-            * tf.det(lengthscale) ** (3 / 2)
-            / tf.sqrt(tf.det(combined_covariance))
+            model.kernel.variance ** (3 / 2)
+            * (2 * math.pi) ** num_dims
+            * tf.linalg.det(lengthscales_sq) ** (3 / 2)
+            / tf.sqrt(tf.linalg.det(combined_covariance))
     )
 
     # N x D
-    data_locations = model.train_inputs[0]
     distribution = tfp.distributions.MultivariateNormalFullCovariance(
-        loc=mean, covariance_matrix=covariance_sum
+        loc=prior.loc, covariance_matrix=covariance_sum
     )
     # N
-    probs = distribution.log_prob(data_locations)
+    probs = distribution.log_prob(X)
     # N x N
-    probs_matrix = (probs.unsqueeze(1) + probs.unsqueeze(0)).exp()
+    probs_matrix = tf.exp(tf.expand_dims(probs, 1) + tf.expand_dims(probs, 0))
 
     # N x D
     location_transform = (
-        data_locations @ inv_lengthscale + mean @ inv_covar
+        X @ inv_lengthscale + tf.reshape(prior.loc, (1, -1)) @ inv_covar
     ) @ inv_precision_sum
     # N x N x D
-    differences = (
-            location_transform.unsqueeze(1) - location_transform.unsqueeze(0)
-    )
+    differences = tf.expand_dims(location_transform, 1) - tf.expand_dims(location_transform, 0)
     # N x N
     exp_term = tf.exp(
         -0.5 * tf.einsum(
             'ijk,kl,ijl->ij',
             differences,
-            tf.inverse(combined_covariance),
+            tf.linalg.inv(combined_covariance),
             differences
         )
     )
-
     # N x N
     integral = constant * probs_matrix * exp_term
     # assert (integral >= 0).all()
-
     return integral

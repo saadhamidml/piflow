@@ -1,7 +1,8 @@
+from abc import abstractmethod
 from gpflow.base import InputData, MeanAndVariance, RegressionData
 from gpflow.models import GPR
 import tensorflow as tf
-from trieste.models import GaussianProcessRegression
+from trieste.models.gpflow.models import GaussianProcessRegression
 
 
 class WarpedGPR(GPR):
@@ -9,10 +10,11 @@ class WarpedGPR(GPR):
 
     def __init__(self, data: RegressionData, *args, **kwargs):
         X_data, unwarped_Y_data = data
+        self.unwarped_Y_data = unwarped_Y_data
         warped_data = X_data, self._warp(unwarped_Y_data)
         super().__init__(warped_data, *args, **kwargs)
-        self.unwarped_Y_data = unwarped_Y_data
 
+    @abstractmethod
     def _warp(self, y: tf.Tensor) -> tf.Tensor:
         """Perform warping of Y values.
         
@@ -23,15 +25,16 @@ class WarpedGPR(GPR):
     
     def predict_g(self, *args, **kwargs):
         """Posterior over warped space."""
-        return self.predict_f(*args, **kwargs)
+        return super().predict_f(*args, **kwargs)
     
+    @abstractmethod
     def predict_f(
         self,
         Xnew: InputData,
         full_cov: bool = False,
         full_output_cov: bool = False
     ) -> MeanAndVariance:
-        raise NotImplementedError
+        """Posterior over unwarped function."""
 
 
 class WSABI_L_GPR(WarpedGPR):
