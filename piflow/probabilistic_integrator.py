@@ -1,3 +1,4 @@
+from distutils.dist import Distribution
 import logging
 from typing import Tuple, Mapping
 import math
@@ -6,7 +7,7 @@ import tensorflow as tf
 import tensorflow_probability as tfp
 import trieste
 
-from .models import WSABI_L_GPR
+from .models import WSABI_L_GPR, MMLT_GPR
 
 
 logger = logging.getLogger(__name__)
@@ -116,15 +117,38 @@ class ProbabilisticIntegrator():
         integrand_model = IntegrandModel(self._prior, model)
         _ = integrand_model.integral_posterior()  # Populate cache.
         return  integrand_model
+    
+
+# Ordinary Bayesian Quadrature
+def _bayesian_quadrature_mean(
+    kernel_integral: tf.Tensor,
+    model: gpflow.models.GPR,
+    posterior: gpflow.posteriors.GPRPosterior = None
+):
+    kernel_integral = tf.reshape(kernel_integral, (1, -1))
+    posterior = model.posterior() if posterior == None else posterior
+    return tf.squeeze(kernel_integral @ posterior.cache[0] @ model.data[1])
+
+def _bayesian_quadrature_var(
+    kernel_integral: tf.Tensor,
+    dbl_kernel_integral: tf.Tensor,
+    model: gpflow.models.GPR,
+    posterior: gpflow.posteriors.GPRPosterior = None
+):
+    kernel_integral = tf.reshape(kernel_integral, (1, -1))
+    posterior = model.posterior() if posterior == None else posterior
+    return (
+        dbl_kernel_integral - kernel_integral @ posterior.cache[0] @ tf.transpose(kernel_integral)
+    )
 
 
-# RBF kernel, Gaussian prior
+# Gaussian prior, RBF kernel, Ordinary GP
 @integral_mean.register(
     tfp.distributions.MultivariateNormalFullCovariance,
     gpflow.models.GPR,
     gpflow.kernels.RBF
 )
-def _rbf_gaussian_mean(
+def _gaussian_rbf_mean(
     prior: tfp.distributions.MultivariateNormalFullCovariance,
     model: gpflow.models.GPR,
     kernel: gpflow.kernels.RBF,
@@ -133,16 +157,15 @@ def _rbf_gaussian_mean(
     """Posterior mean over integral for a GP with an RBF kernel against
     a Gaussian prior.
     """
-    posterior = model.posterior() if posterior == None else posterior
-    kernel_integral = tf.reshape(_rbf_gaussian_kernel_integral(prior, model), (1, -1))
-    return tf.squeeze(kernel_integral @ posterior.cache[0] @ model.data[1])
+    kernel_integral = _gaussian_rbf_kernel_integral(prior, model)
+    return _bayesian_quadrature_mean(kernel_integral, model, posterior)
 
 @integral_variance.register(
     tfp.distributions.MultivariateNormalFullCovariance,
     gpflow.models.GPR,
     gpflow.kernels.RBF
 )
-def _rbf_gaussian_var(
+def _gaussian_rbf_var(
     prior: tfp.distributions.MultivariateNormalFullCovariance,
     model: gpflow.models.GPR,
     kernel: gpflow.kernels.RBF,
@@ -151,14 +174,11 @@ def _rbf_gaussian_var(
     """Posterior variance over integral for a GP with an RBF kernel
     against a Gaussian prior.
     """
-    posterior = model.posterior() if posterior == None else posterior
-    dbl_kernel_integral = _rbf_gaussian_double_kernel_integral(prior, model)
-    kernel_integral = tf.reshape(_rbf_gaussian_kernel_integral(prior, model), (1, -1))
-    return (
-        dbl_kernel_integral - kernel_integral @ posterior.cache[0] @ tf.transpose(kernel_integral)
-    )
+    dbl_kernel_integral = _gaussian_rbf_double_kernel_integral(prior, model)
+    kernel_integral = _gaussian_rbf_kernel_integral(prior, model)
+    return _bayesian_quadrature_var(kernel_integral, dbl_kernel_integral, model, posterior)
 
-def _rbf_gaussian_kernel_integral(
+def _gaussian_rbf_kernel_integral(
     prior: tfp.distributions.MultivariateNormalFullCovariance,
     model: gpflow.models.GPR,
 ) -> tf.Tensor:
@@ -175,7 +195,7 @@ def _rbf_gaussian_kernel_integral(
     ).prob(X)  # [N]
     return constant * normal_probs  # [N]
 
-def _rbf_gaussian_double_kernel_integral(
+def _gaussian_rbf_double_kernel_integral(
     prior: tfp.distributions.MultivariateNormalFullCovariance,
     model: gpflow.models.GPR,
 ) -> tf.Tensor:
@@ -188,6 +208,61 @@ def _rbf_gaussian_double_kernel_integral(
     constant = kernel.variance * tf.sqrt(tf.linalg.det(2 * math.pi * lengthscales_sq))
     combined_cov = prior.covariance() + 2 * lengthscales_sq  # [D, D]
     return constant / tf.sqrt(tf.linalg.det(combined_cov))  # Scalar
+
+
+# Uniform prior, RBF kernel, Ordinary GP
+@integral_mean.register(
+    tfp.distributions.Uniform,
+    gpflow.models.GPR,
+    gpflow.kernels.RBF
+)
+def _uniform_rbf_mean(
+    prior: tfp.distributions.Uniform,
+    model: gpflow.models.GPR,
+    kernel: gpflow.kernels.RBF,
+    posterior: gpflow.posteriors.GPRPosterior = None
+):
+    kernel_integral = _uniform_rbf_kernel_integral(prior, model)
+    return _bayesian_quadrature_mean(kernel_integral, model, posterior)
+
+@integral_variance.register(
+    tfp.distributions.Uniform,
+    gpflow.models.GPR,
+    gpflow.kernels.RBF
+)
+def _uniform_rbf_var(
+    prior: tfp.distributions.Uniform,
+    model: gpflow.models.GPR,
+    kernel: gpflow.kernels.RBF,
+    posterior: gpflow.posteriors.GPRPosterior = None
+):
+    dbl_kernel_integral = _uniform_rbf_double_kernel_integral(prior, model)
+    kernel_integral = _uniform_rbf_kernel_integral(prior, model)
+    return _bayesian_quadrature_var(kernel_integral, dbl_kernel_integral, model, posterior)
+
+def _uniform_rbf_kernel_integral(
+    prior: tfp.distributions.Uniform,
+    model: gpflow.models.GPR
+):
+    X, _ = model.data
+    kernel = model.kernel
+    sqrt_tau = 1 / (math.sqrt(2) * kernel.lengthscales)
+    constant = math.sqrt(math.pi) / (2 * sqrt_tau * (prior.high - prior.low))
+    erf = tf.math.erf(sqrt_tau * (X - prior.low)) - tf.math.erf(sqrt_tau * (X - prior.high))
+    return kernel.variance * tf.reduce_prod(constant * erf, axis=1)
+
+def _uniform_rbf_double_kernel_integral(
+    prior: tfp.distributions.Uniform,
+    model: gpflow.models.GPR
+):
+    X, _ = model.data
+    kernel = model.kernel
+    tau = 1 / (2 * kernel.lengthscales ** 2)
+    prior_diff = prior.high - prior.low
+    constant = math.sqrt(math.pi) / (2 * tf.math.sqrt(tau) * (prior.high - prior.low) ** 2)
+    t1 = -2 * prior_diff * tf.math.erf(-tf.math.sqrt(tau) * prior_diff)
+    t2 = 2 * tf.math.expm1(-tau * prior_diff ** 2) / tf.math.sqrt(math.pi * tau)
+    return kernel.variance * tf.reduce_prod(constant * (t1 + t2))
 
 
 # WSABI-L, RBF kernel, Gaussian prior
@@ -234,7 +309,7 @@ def _wsabi_variance(
     K_inv_z = posterior.cache[0] @ Z  # [N, 1]
     triple_integral = _wsabi_triple_kernel_integral(prior, model)
     double_integral = _wsabi_double_kernel_integral(prior, model)
-    dbl_int_z = double_integral @ Z
+    dbl_int_z = double_integral @ posterior.cache[0] @ Z
     prior_term = tf.transpose(K_inv_z) @ triple_integral @ K_inv_z
     correction_term = tf.transpose(dbl_int_z) @ posterior.cache[0] @ dbl_int_z
     integral_variance = tf.squeeze(prior_term - correction_term)
@@ -333,3 +408,49 @@ def _wsabi_triple_kernel_integral(
     integral = constant * probs_matrix * exp_term
     # assert (integral >= 0).all()
     return integral
+
+
+# Generic Prior, MMLT
+@integral_mean.register(
+    tfp.distributions.Distribution,
+    MMLT_GPR,
+    gpflow.kernels.Kernel
+)
+def _mmlt_mean(
+    prior: tfp.distributions.Distribution,
+    model: MMLT_GPR,
+    kernel: gpflow.kernels.Kernel,
+    posterior: gpflow.posteriors.GPRPosterior = None,
+    num_samples: int = None
+):
+    num_samples = 1000 * model.data[0].shape[1]
+    samples = prior.sample(num_samples)  # [N, D]
+    mean, _ = model.predict_f(samples, posterior=posterior)
+    return tf.math.reduce_mean(mean)
+
+@integral_variance.register(
+    tfp.distributions.Distribution,
+    MMLT_GPR,
+    gpflow.kernels.Kernel
+)
+def _mmlt_var(
+    prior: tfp.distributions.Distribution,
+    model: MMLT_GPR,
+    kernel: gpflow.kernels.Kernel,
+    posterior: gpflow.posteriors.GPRPosterior = None,
+    num_samples: int = None
+):  
+    X, Z = model.data
+    posterior = model.posterior() if posterior == None else posterior
+    num_samples = 1000 * X.shape[1]
+    samples1 = prior.sample(num_samples)
+    samples2 = prior.sample(num_samples)
+    f_mean1, _ = model.predict_g(samples1, posterior=posterior)
+    f_mean2, _ = model.predict_g(samples2, posterior=posterior)
+    covar_factors = f_mean1 * f_mean2
+    cross_cov = tf.linalg.diag_part(kernel.K(samples1, samples2)) - tf.linalg.diag_part(
+        kernel.K(samples1, X) @ posterior.cache[0] @ kernel.K(X, samples2)
+    )
+    integral_var = tf.reduce_sum(covar_factors * tf.math.expm1(cross_cov)) / num_samples
+    assert integral_var >= 0
+    return integral_var

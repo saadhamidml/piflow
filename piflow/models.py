@@ -1,6 +1,7 @@
 from abc import abstractmethod
 from gpflow.base import InputData, MeanAndVariance, RegressionData
 from gpflow.models import GPR
+from gpflow.posteriors import GPRPosterior
 import tensorflow as tf
 from trieste.models.gpflow.models import GaussianProcessRegression
 
@@ -23,9 +24,12 @@ class WarpedGPR(GPR):
         """
         raise NotImplementedError
     
-    def predict_g(self, *args, **kwargs):
+    def predict_g(self, *args, posterior: GPRPosterior = None, **kwargs):
         """Posterior over warped space."""
-        return super().predict_f(*args, **kwargs)
+        if posterior is not None:
+            return posterior.predict_f(*args, **kwargs)
+        else:
+            return super().predict_f(*args, **kwargs)
     
     @abstractmethod
     def predict_f(
@@ -51,12 +55,13 @@ class WSABI_L_GPR(WarpedGPR):
         self,
         Xnew: InputData,
         full_cov: bool = False,
-        full_output_cov: bool = False
+        full_output_cov: bool = False,
+        posterior: GPRPosterior = None
     ) -> MeanAndVariance:
         if full_output_cov:
             raise NotImplementedError
         g_mean, g_var = self.predict_g(
-            Xnew, full_cov, full_output_cov
+            Xnew, full_cov, full_output_cov, posterior=posterior
         )
         f_mean = self.alpha + g_mean ** 2 / 2
         if full_cov:
@@ -70,18 +75,19 @@ class MMLT_GPR(WarpedGPR):
     """Moment matched log transform model."""
 
     def _warp(self, y: tf.Tensor) -> tf.Tensor:
-        return tf.log(y) 
+        return tf.math.log(y) 
 
     def predict_f(
         self,
         Xnew: InputData,
         full_cov: bool = False,
-        full_output_cov: bool = False
+        full_output_cov: bool = False,
+        posterior: GPRPosterior = None
     ) -> MeanAndVariance:
         if full_output_cov:
             raise NotImplementedError
         # Get warped prediction.
-        g_mean, g_var = self.predict_g(Xnew, full_cov, full_output_cov)
+        g_mean, g_var = self.predict_g(Xnew, full_cov, full_output_cov, posterior=posterior)
         g_var_diag = tf.linalg.diag_part(g_var) if full_cov else g_var
         # Compute unwarping.
         f_mean = tf.exp(g_mean + 0.5 * g_var_diag)
