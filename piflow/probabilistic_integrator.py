@@ -1,5 +1,5 @@
 import logging
-from typing import Tuple, Mapping
+from typing import Tuple, Mapping, Generic
 import math
 import gpflow
 import tensorflow as tf
@@ -7,6 +7,7 @@ import tensorflow_probability as tfp
 import trieste
 
 from .models import WSABI_L_GPR
+from gpmaniflow.models import LogBezierProcess
 
 
 logger = logging.getLogger(__name__)
@@ -333,3 +334,25 @@ def _wsabi_triple_kernel_integral(
     integral = constant * probs_matrix * exp_term
     # assert (integral >= 0).all()
     return integral
+
+@integral_mean.register(
+    tfp.distributions.Uniform,
+    LogBezierProcess,
+    Generic)
+def _LogBez_mean(
+        prior: tfp.distributions.Uniform,
+        model: LogBezierProcess,
+        kernel: Generic):
+    return model.BB.integral_mean()
+
+@integral_variance.register(
+    tfp.distributions.Uniform,
+    LogBezierProcess,
+    Generic)
+def _LogBez_variance(
+        prior: tfp.distributions.Uniform,
+        model: LogBezierProcess,
+        kernel: Generic):
+    return model.BB.integral_variance()
+
+
