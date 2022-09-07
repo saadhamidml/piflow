@@ -105,4 +105,6 @@ class uncertainty_sampling(AcquisitionFunctionClass):
         """Uncertainty sampling acquisition function."""
         _, var = self._model.predict(x)
         log_prior = self._prior.log_prob(x)
+        if len(log_prior.shape) == 3:
+            log_prior = tf.reduce_sum(log_prior, axis=-1)
         return tf.reshape(tf.math.log(var), (-1, 1)) + 2 * log_prior

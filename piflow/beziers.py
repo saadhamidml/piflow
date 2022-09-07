@@ -5,11 +5,12 @@ from typing import Optional, Tuple, Union, cast
 
 import gpflow
 from gpflow.utilities import is_variable
-
+from trieste.data import Dataset
 from trieste.models.gpflow.interface import GPflowPredictor
 from trieste.models.interfaces import TrainableProbabilisticModel
-from trieste.models.optimizer import BatchOptimizer
+from trieste.models.optimizer import BatchOptimizer, Optimizer
 from trieste.models.gpflow.utils import check_optimizer
+from trieste.types import TensorType
 
 from gpmaniflow.models.BezierProcess import LogBezierProcess
 
@@ -49,8 +50,13 @@ class BezierProcessRegression(
     def model(self) -> LogBezierProcess:
         return self._model
 
+    def predict(self, query_points: TensorType) -> tuple[TensorType, TensorType]:
+        query_points = tf.reshape(query_points, (-1, self._model.input_dim))
+        mean, cov = super().predict(query_points)
+        return tf.expand_dims(mean, 1), tf.expand_dims(cov, 1)
+
     def predict_y(self, query_points: TensorType) -> tuple[TensorType, TensorType]:
-        return
+        raise NotImplementedError
 
     def update(self, dataset: Dataset) -> None:
         self._ensure_variable_model_data()
