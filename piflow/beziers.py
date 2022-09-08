@@ -43,23 +43,23 @@ class BezierProcessRegression(
             print(self._model.num_data)
             self._model.num_data = tf.Variable(self._model.num_data, trainable = False)
 
-    def __repr__(self) -> str:
-        return 0 ## FIX
-
     @property
     def model(self) -> LogBezierProcess:
         return self._model
+    
+    def get_kernel(self) -> gpflow.kernels.Kernel:
+        return None
 
     def predict(self, query_points: TensorType) -> tuple[TensorType, TensorType]:
         query_points = tf.reshape(query_points, (-1, self._model.input_dim))
         mean, cov = super().predict(query_points)
         return tf.expand_dims(mean, 1), tf.expand_dims(cov, 1)
 
-    def predict_y(self, query_points: TensorType) -> tuple[TensorType, TensorType]:
-        raise NotImplementedError
-
     def update(self, dataset: Dataset) -> None:
         self._ensure_variable_model_data()
+        num_data = dataset.query_points.shape[0]
+        self.model.num_data.assign(num_data)
 
-        
+    def optimize(self, dataset: Dataset) -> None:
+        return super().optimize(dataset)
 

@@ -14,28 +14,21 @@ from piflow.probabilistic_integrator import ProbabilisticIntegrator
 
 from piflow.objectives.genz import ContinuousFamily
 
-# Define problem
-#integrand = tfp.distributions.MultivariateNormalFullCovariance(
-#    loc=tf.constant([1., 1.], dtype=tf.float64),
-#    covariance_matrix=tf.constant([[2., 0.], [0., 2.]], dtype=tf.float64)
-#)
-
-# Wrap for trieste.
+# Set up and wrap for trieste.
 integrand = ContinuousFamily(seed = 0)
-#def eval_integrand(x: tf.Tensor) -> tf.Tensor:
-#    return tf.expand_dims(integrand.prob(x), -1)
 observer = mk_observer(integrand)
-
-search_space = integrand.domain#Box(lower=[0.], upper=[1.])
-#print(search_space.dtype)
-prior = tfp.distributions.Uniform(low = tf.cast(0.0, tf.float64), high = tf.cast(1.0, tf.float64))#, dtype = tf.float64)
+# search_space is for acquisition optimisation only. We need to set the bounds slightly narrower
+# than the integrand domain because the gradient becomes NaN if the acquisition function is
+# evaluated at the corners, causing the acquisition function optimisation to fail.
+# search_space = integrand.domain
+search_space = Box(lower=[1e-6], upper=[1 - 1e-6])
+prior = tfp.distributions.Uniform(low = tf.cast(0.0, tf.float64), high = tf.cast(1.0, tf.float64))
 # Sample initial datapoints.
 num_initial_points = 2
 initial_query_points = search_space.sample_sobol(num_initial_points)
 initial_data = observer(initial_query_points)
 
 # Set up the model.
-#gpflow_model = WSABI_L_GPR(initial_data.astuple(), kernel=gpflow.kernels.SquaredExponential())
 logbezier_model = LogBezierProcess(input_dim = 1, likelihood = gpflow.likelihoods.Gaussian(), num_data = num_initial_points)
 model = BezierProcessRegression(logbezier_model)
 
@@ -43,7 +36,7 @@ model = BezierProcessRegression(logbezier_model)
 acquisition_rule = AcquisitionRule(builder=UncertaintySampling())
 
 # Run the integrator.
-num_steps = 15
+num_steps = 10
 integrator = ProbabilisticIntegrator(observer, prior, search_space)
 result = integrator.integrate(
     num_steps,
