@@ -6,7 +6,7 @@ from trieste.space import Box
 from trieste.objectives.utils import mk_observer
 #from trieste.models.gpflow.models import GaussianProcessRegression
 from piflow.acquisition_functions import AcquisitionRule, UncertaintySampling
-from piflow.beziers import BezierProcessRegression
+from piflow.models.beziers import BezierProcessRegression
 
 #from piflow.models import WSABI_L_GPR
 from gpmaniflow.models import LogBezierProcess

@@ -14,7 +14,9 @@ from trieste.types import TensorType
 
 from gpmaniflow.models.BezierProcess import LogBezierProcess
 
-class BezierProcessRegression(
+from piflow.models.transforms import DataTransformMixin
+
+class _BezierProcessRegression(
         GPflowPredictor,
         TrainableProbabilisticModel
         ):
@@ -63,3 +65,6 @@ class BezierProcessRegression(
     def optimize(self, dataset: Dataset) -> None:
         return super().optimize(dataset)
 
+
+class BezierProcessRegression(DataTransformMixin, _BezierProcessRegression):
+    pass

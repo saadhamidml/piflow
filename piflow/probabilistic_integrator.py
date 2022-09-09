@@ -7,7 +7,11 @@ import tensorflow as tf
 import tensorflow_probability as tfp
 import trieste
 
-from .models import WSABI_L_GPR, MMLT_GPR
+from piflow.models.transforms import (
+    DataTransformMixin, IdentityTransformer, StandardTransformer, MinMaxTransformer
+)
+
+from .models.warped import WSABI_L_GPR, MMLT_GPR
 from gpmaniflow.models import LogBezierProcess
 
 NoneType = type(None)
@@ -62,6 +66,19 @@ class IntegrandModel():
             self._integral_variance = int_variance
         else:
             int_variance = self._integral_variance
+        if isinstance(self._model, DataTransformMixin):
+            if not isinstance(self._model._query_point_transformer, IdentityTransformer):
+                raise NotImplementedError
+            if (
+                not isinstance(self._model._observation_transformer, StandardTransformer)
+                and not isinstance(self._model._observation_transformer, MinMaxTransformer)
+            ):
+                raise NotImplementedError
+            # Assumes the prior integrates to 1.
+            int_mean = self._model._observation_transformer.inverse_transform(int_mean)
+            int_variance = self._model._observation_transformer.inverse_transform_variance(
+                int_variance
+            )
         return int_mean, int_variance
 
 
@@ -451,8 +468,8 @@ def _mmlt_var(
     num_samples = 1000 * X.shape[1]
     samples1 = prior.sample(num_samples)
     samples2 = prior.sample(num_samples)
-    f_mean1, _ = model.predict_g(samples1, posterior=posterior)
-    f_mean2, _ = model.predict_g(samples2, posterior=posterior)
+    f_mean1, _ = model.predict_f(samples1, posterior=posterior)
+    f_mean2, _ = model.predict_f(samples2, posterior=posterior)
     covar_factors = f_mean1 * f_mean2
     cross_cov = tf.linalg.diag_part(kernel.K(samples1, samples2)) - tf.linalg.diag_part(
         kernel.K(samples1, X) @ posterior.cache[0] @ kernel.K(X, samples2)
