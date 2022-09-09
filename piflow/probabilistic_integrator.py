@@ -351,8 +351,8 @@ def _LogBez_mean(
     kernel: NoneType,
     posterior: gpflow.posteriors.AbstractPosterior = None
 ) -> tf.Tensor:
-    return model.BB.integral()
-    # return model.BB.integral_mean()
+    #return model.BB.integral()
+    return model.BB.integral_mean()
 
 @integral_variance.register(
     tfp.distributions.Uniform,
@@ -365,8 +365,8 @@ def _LogBez_variance(
     kernel: NoneType,
     posterior: gpflow.posteriors.AbstractPosterior = None
 ) -> tf.Tensor:
-    import warnings
-    warnings.warn(f'Integral Variance not implemented for LogBezierProcess')
-    from numpy import nan
-    return tf.constant(nan)
-    # return model.BB.integral_variance()
+    #import warnings
+    #warnings.warn(f'Integral Variance not implemented for LogBezierProcess')
+    #from numpy import nan
+    #return tf.constant(nan)
+    return model.BB.integral_variance()

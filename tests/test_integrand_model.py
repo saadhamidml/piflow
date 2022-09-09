@@ -38,8 +38,8 @@ def test_integrand_model(warping: str = None):
         covariance_matrix=prior.covariance() + integrand.covariance()
     ).prob(integrand.loc)
     tf.debugging.assert_near(true_integral, int_mean)
-
+    
 
 if __name__ == '__main__':
-    # test_integrand_model()
+    #test_integrand_model()
     test_integrand_model(warping='WSABI-L')

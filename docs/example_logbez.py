@@ -21,7 +21,7 @@ observer = mk_observer(integrand)
 # than the integrand domain because the gradient becomes NaN if the acquisition function is
 # evaluated at the corners, causing the acquisition function optimisation to fail.
 # search_space = integrand.domain
-search_space = Box(lower=[1e-6], upper=[1 - 1e-6])
+search_space = Box(lower=[0 + 1e-6], upper=[1 - 1e-6])
 prior = tfp.distributions.Uniform(low = tf.cast(0.0, tf.float64), high = tf.cast(1.0, tf.float64))
 # Sample initial datapoints.
 num_initial_points = 2
@@ -29,7 +29,7 @@ initial_query_points = search_space.sample_sobol(num_initial_points)
 initial_data = observer(initial_query_points)
 
 # Set up the model.
-logbezier_model = LogBezierProcess(input_dim = 1, likelihood = gpflow.likelihoods.Gaussian(), num_data = num_initial_points)
+logbezier_model = LogBezierProcess(input_dim = 1, orders = 1, likelihood = gpflow.likelihoods.Gaussian(), num_data = num_initial_points)
 model = BezierProcessRegression(logbezier_model)
 
 # Set up the acquisition function.

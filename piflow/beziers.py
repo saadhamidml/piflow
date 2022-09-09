@@ -30,9 +30,9 @@ class BezierProcessRegression(
             # FIX OPTIMIZER
 
         super().__init__(optimizer)
-
+        
         check_optimizer(self.optimizer)
-
+        
         self._model = model
         self._ensure_variable_model_data()
 
