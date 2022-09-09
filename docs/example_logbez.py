@@ -29,7 +29,7 @@ initial_query_points = search_space.sample_sobol(num_initial_points)
 initial_data = observer(initial_query_points)
 
 # Set up the model.
-logbezier_model = LogBezierProcess(input_dim = 1, orders = 1, likelihood = gpflow.likelihoods.Gaussian(), num_data = num_initial_points)
+logbezier_model = LogBezierProcess(input_dim = 1, orders = 3, likelihood = gpflow.likelihoods.Gaussian(), num_data = num_initial_points)
 model = BezierProcessRegression(logbezier_model)
 
 # Set up the acquisition function.
@@ -48,3 +48,4 @@ integral_mean, integral_variance = result.integral_posterior()
 
 print(f'Integral Mean: {integral_mean}')
 print(f'Integral Variance: {integral_variance}')
+print("Actual integral:", integrand.integral_value)

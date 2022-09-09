@@ -11,7 +11,7 @@ class ContinuousFamily():
         
         self.a = tf.random.uniform(shape = [1, self._dimension], dtype = default_float())
         self.u = tf.random.uniform(shape = [1, self._dimension], dtype = default_float())
-        self.integral_value = tf.reduce_prod(2 / self.a * (1 - 0.5*tf.math.exp(-self.a * (1 - self.u)) - tf.math.exp(-self.a*self.u)))
+        self.integral_value = tf.reduce_prod(2 / self.a * (1 - 0.5*tf.math.exp(-self.a * (1 - self.u)) - 0.5*tf.math.exp(-self.a*self.u)))
         
     def __call__(self, x: tf.Tensor) -> tf.Tensor:
         f = self.a * tf.math.abs(x - self.u)

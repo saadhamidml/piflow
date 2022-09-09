@@ -26,7 +26,7 @@ class BezierProcessRegression(
             ):
 
         if optimizer is None:
-            optimizer = BatchOptimizer(tf.optimizers.Adam(), batch_size=100, compile=True)
+            optimizer = BatchOptimizer(tf.optimizers.Adam(lr = 0.01), batch_size=100, max_iter = 5000, compile=True)
             # FIX OPTIMIZER
 
         super().__init__(optimizer)
