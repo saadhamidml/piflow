@@ -59,11 +59,11 @@ def test_integrand_model(warping: str = None, prior_type: str = 'gaussian'):
     int_mean, int_var = integrand_model.integral_posterior()
     # Assert approximation is close to true value.
     tf.debugging.assert_near(true_integral, int_mean)
-
+    
 
 if __name__ == '__main__':
     # test_integrand_model(warping=None, prior_type='gaussian')
-    test_integrand_model(warping=None, prior_type='uniform'
+    test_integrand_model(warping=None, prior_type='uniform')
     # test_integrand_model(warping='WSABI-L', prior_type='gaussian')
     # test_integrand_model(warping='WSABI-L', prior_type='uniform')
     # test_integrand_model(warping='MMLT', prior_type='gaussian')

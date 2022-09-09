@@ -8,7 +8,9 @@ import tensorflow_probability as tfp
 import trieste
 
 from .models import WSABI_L_GPR, MMLT_GPR
+from gpmaniflow.models import LogBezierProcess
 
+NoneType = type(None)
 
 logger = logging.getLogger(__name__)
 
@@ -35,12 +37,16 @@ class IntegrandModel():
         :return: Integral mean, scalar; integral standard deviation,
             scalar.
         """
-        posterior = self._model._model.posterior()  # Populate caches.
+        try:
+            posterior = self._model._model.posterior()  # Populate caches.
+        except AttributeError as e:
+            # LogBezierProcess does not have kernel or caching.
+            posterior = None
         if self._integral_mean is None:
             int_mean = integral_mean(
                 self._prior,
                 self._model._model,
-                self._model._model.kernel,  # Included in function signature for multiple dispatch.
+                self._model.get_kernel(),  # Included in function signature for multiple dispatch.
                 posterior=posterior
             )
             self._integral_mean = int_mean
@@ -50,7 +56,7 @@ class IntegrandModel():
             int_variance = integral_variance(
                 self._prior,
                 self._model._model,
-                self._model._model.kernel,  # Included in function signature for multiple dispatch.
+                self._model.get_kernel(),  # Included in function signature for multiple dispatch.
                 posterior=posterior
             )
             self._integral_variance = int_variance
@@ -454,3 +460,36 @@ def _mmlt_var(
     integral_var = tf.reduce_sum(covar_factors * tf.math.expm1(cross_cov)) / num_samples
     assert integral_var >= 0
     return integral_var
+
+
+# Uniform Prior, Log-Bezier Process
+@integral_mean.register(
+    tfp.distributions.Uniform,
+    LogBezierProcess,
+    NoneType
+)
+def _LogBez_mean(
+    prior: tfp.distributions.Uniform,
+    model: LogBezierProcess,
+    kernel: NoneType,
+    posterior: gpflow.posteriors.AbstractPosterior = None
+) -> tf.Tensor:
+    #return model.BB.integral()
+    return model.BB.integral_mean()
+
+@integral_variance.register(
+    tfp.distributions.Uniform,
+    LogBezierProcess,
+    NoneType
+)
+def _LogBez_variance(
+    prior: tfp.distributions.Uniform,
+    model: LogBezierProcess,
+    kernel: NoneType,
+    posterior: gpflow.posteriors.AbstractPosterior = None
+) -> tf.Tensor:
+    #import warnings
+    #warnings.warn(f'Integral Variance not implemented for LogBezierProcess')
+    #from numpy import nan
+    #return tf.constant(nan)
+    return model.BB.integral_variance()
