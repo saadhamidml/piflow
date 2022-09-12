@@ -7,8 +7,10 @@ import numpy as np
 import tensorflow as tf
 import tensorflow_probability as tfp
 
+from piflow.models.warped import WarpedGPR
 
-def initialise_hyperparameters(model: gpflow.models.GPR, num_samples: int = 1000):
+
+def initialise_hyperparameters(model: gpflow.models.GPR, num_samples: int = 100):
     """Sample from hyperparameter priors and initialise with the best.
     
     :param model: The model.
@@ -48,7 +50,7 @@ def set_model_priors(model: gpflow.models.GPR):
     """
     X, Y = model.data
     _set_lengthscales_prior(model, X)
-    _set_variance_priors(model, Y)
+    _set_variance_priors(model)
 
 
 def _set_lengthscales_prior(model: gpflow.models.GPR, query_points: tf.Tensor):
@@ -65,13 +67,15 @@ def _set_lengthscales_prior(model: gpflow.models.GPR, query_points: tf.Tensor):
     log_triu_diffs = np.log(triu_diffs)
     log_max = np.max(log_triu_diffs, axis=0)
     log_min = np.min(log_triu_diffs, axis=0)
-    loc = tf.constant(log_min + (log_max - log_min) / 2, dtype=default_float())
-    scale = tf.constant((log_max - log_min) / 10, dtype=default_float())
-    model.kernel.lengthscales.assign(tf.math.exp(loc))
-    model.kernel.lengthscales.prior = tfp.distributions.LogNormal(loc, scale)
+    log_median = np.median(log_triu_diffs, axis=0)
+    scale = np.minimum(log_max - log_median, log_median - log_min) / 3
+    log_median = tf.constant(log_median, dtype=default_float())
+    scale = tf.constant(scale, dtype=default_float())
+    model.kernel.lengthscales.assign(tf.math.exp(log_median))
+    model.kernel.lengthscales.prior = tfp.distributions.LogNormal(log_median, scale)
 
 
-def _set_variance_priors(model: gpflow.models.GPR, observations: tf.Tensor):
+def _set_variance_priors(model: gpflow.models.GPR, observations: tf.Tensor = None):
     """Set signal and noise variance hyperparameters and their priors.
     
     :param model: The model.
@@ -79,7 +83,10 @@ def _set_variance_priors(model: gpflow.models.GPR, observations: tf.Tensor):
     """
     LOG_SCALE = 1e-2
     SIGNAL_TO_NOISE_RATIO = math.e ** 2
-    variance = tf.math.reduce_variance(observations)
+    if observations is not None:
+        variance = tf.math.reduce_variance(observations)
+    else:
+        variance = tf.constant(1, dtype=default_float())
     likelihood_var = variance / SIGNAL_TO_NOISE_RATIO
     model.kernel.variance.assign(variance)
     model.kernel.variance.prior = tfp.distributions.LogNormal(
