@@ -7,6 +7,7 @@ from trieste.objectives.utils import mk_observer
 #from trieste.models.gpflow.models import GaussianProcessRegression
 from piflow.acquisition_functions import AcquisitionRule, UncertaintySampling
 from piflow.models.beziers import BezierProcessRegression
+from piflow.models.transforms import MinMaxTransformer
 
 #from piflow.models import WSABI_L_GPR
 from gpmaniflow.models import LogBezierProcess
@@ -29,8 +30,10 @@ initial_query_points = search_space.sample_sobol(num_initial_points)
 initial_data = observer(initial_query_points)
 
 # Set up the model.
+_, Y = initial_data.astuple()
+observation_transformer = MinMaxTransformer(Y)
 logbezier_model = LogBezierProcess(input_dim = 1, orders = 3, likelihood = gpflow.likelihoods.Gaussian(), num_data = num_initial_points)
-model = BezierProcessRegression(logbezier_model)
+model = BezierProcessRegression(logbezier_model, observation_transformer=observation_transformer)
 
 # Set up the acquisition function.
 acquisition_rule = AcquisitionRule(builder=UncertaintySampling())

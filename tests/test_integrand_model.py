@@ -5,7 +5,7 @@ import tensorflow_probability as tfp
 from trieste.models.gpflow.models import GaussianProcessRegression
 import pytest
 from piflow.models.transforms import DataTransformMixin, MinMaxTransformer, StandardTransformer
-from piflow.models.utils import initialise_lengthscales, set_model_priors
+from piflow.models.utils import initialise_hyperparameters, set_model_priors
 
 from piflow.models.warped import MMLT_GPR, WSABI_L_GPR, WarpedGaussianProcessRegression
 from piflow.probabilistic_integrator import IntegrandModel
@@ -40,8 +40,7 @@ def test_integrand_model(warping: str, prior_type: str):
         true_integral = tf.reduce_prod(cdf(prior.high) - cdf(prior.low))
     X = integrand.sample(500)
     Y = tf.reshape(integrand.prob(X), (-1, 1))
-    lengthscales = initialise_lengthscales(X)
-    kernel = gpflow.kernels.SquaredExponential(lengthscales=lengthscales)
+    kernel = gpflow.kernels.SquaredExponential(lengthscales=tf.ones(X.shape[1]))
     # Set up and train integrand model
     if warping is None:
         observation_transformer = StandardTransformer(Y)
@@ -70,10 +69,11 @@ def test_integrand_model(warping: str, prior_type: str):
         gpflow_model = MMLT_GPR((X, Y_), kernel)
         PIFlowModel = WarpedGaussianProcessRegression
     set_model_priors(gpflow_model)
+    # initialise_hyperparameters(gpflow_model)
     model = PIFlowModel(gpflow_model, observation_transformer=observation_transformer)
     integrand_model = IntegrandModel(prior, model)
     opt = gpflow.optimizers.Scipy()
-    opt.minimize(gpflow_model.training_loss, gpflow_model.trainable_variables)
+    # opt.minimize(gpflow_model.training_loss, gpflow_model.trainable_variables)
     gpflow.utilities.print_summary(gpflow_model)
     # Compute integral.
     int_mean, int_var = integrand_model.integral_posterior()
@@ -81,10 +81,10 @@ def test_integrand_model(warping: str, prior_type: str):
     tf.debugging.assert_near(true_integral, int_mean, rtol=0.1)
     
 
-# if __name__ == '__main__':
+if __name__ == '__main__':
     # test_integrand_model(warping=None, prior_type='gaussian')
     # test_integrand_model(warping=None, prior_type='uniform')
-    # test_integrand_model(warping='WSABI-L', prior_type='gaussian')
+    test_integrand_model(warping='WSABI-L', prior_type='gaussian')
     # test_integrand_model(warping='WSABI-L', prior_type='uniform')
     # test_integrand_model(warping='MMLT', prior_type='gaussian')
     # test_integrand_model(warping='MMLT', prior_type='uniform')
