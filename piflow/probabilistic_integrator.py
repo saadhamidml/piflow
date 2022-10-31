@@ -126,7 +126,9 @@ class ProbabilisticIntegrator():
             query_points = acquistion_rule.acquire(
                 self._search_space, models, datasets=datasets, prior=self._prior
             )
+            print("Query:", query_points.numpy())
             observer_output = self._observer(query_points)
+            print("Observed:", observer_output.observations.numpy())
             tagged_output = (
                 observer_output
                 if isinstance(observer_output, Mapping)
