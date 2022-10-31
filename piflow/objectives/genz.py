@@ -51,9 +51,9 @@ class CornerPeakFamily():
         else:
             print("Integral value not analytical for this choice of a")
         
-    def __call__(x: tf.Tensor) -> tf.Tensor:
+    def __call__(self, x: tf.Tensor) -> tf.Tensor:
         f = 1 + tf.reduce_sum(self.a * x, axis = 1, keepdims = True)
-        f = f ** (-d - 1)
+        f = f ** (-self._dimension - 1)
         return f
 
 class GaussianPeakFamily():
@@ -72,8 +72,9 @@ class GaussianPeakFamily():
         G = tfp.distributions.Normal(loc = tf.cast(0.0, default_float()), scale = tf.cast(1.0, default_float()))
         vec = 1 / self.a * ( G.cdf(2 ** 0.5 * self.a * (1-self.u)) - G.cdf(- 2 ** 0.5 * self.a * self.u))
         self.integral_value = pi ** (self._dimension / 2) * tf.reduce_prod(vec)
-    def __call__(x: tf.Tensor) -> tf.Tensor:
-        f = tf.reduce_sum( a ** 2 * (x - u) ** 2, axis = 1, keepdims = True)
+
+    def __call__(self, x: tf.Tensor) -> tf.Tensor:
+        f = tf.reduce_sum( self.a ** 2 * (x - self.u) ** 2, axis = 1, keepdims = True)
         f = tf.math.exp(-f)
         return f
 
