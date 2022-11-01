@@ -305,7 +305,7 @@ def _wsabi_mean(
     kernel and Gaussian prior.
     """
     posterior = model.posterior() if posterior == None else posterior
-    K_inv_z = posterior.cache[0] @ model.data[1]  # [N, 1]
+    K_inv_z = posterior.cache[0]  # [N, 1]
     dbl_kernel_integral = _wsabi_double_kernel_integral(prior, model)
     integral_mean = tf.squeeze(
         model.alpha + 0.5 * (tf.transpose(K_inv_z) @ dbl_kernel_integral @ K_inv_z)
@@ -330,12 +330,14 @@ def _wsabi_variance(
     """
     posterior = model.posterior() if posterior == None else posterior
     X, Z = model.data
-    K_inv_z = posterior.cache[0] @ Z  # [N, 1]
+    K_inv_z = posterior.cache[0]  # [N, 1]
     triple_integral = _wsabi_triple_kernel_integral(prior, model)
     double_integral = _wsabi_double_kernel_integral(prior, model)
-    dbl_int_z = double_integral @ posterior.cache[0] @ Z
+    dbl_int_z = double_integral @ posterior.cache[0]
     prior_term = tf.transpose(K_inv_z) @ triple_integral @ K_inv_z
-    correction_term = tf.transpose(dbl_int_z) @ posterior.cache[0] @ dbl_int_z
+    L_inv_dbl_int_z = tf.linalg.cholesky_solve(posterior.cache[1], dbl_int_z)
+    correction_term = tf.transpose(L_inv_dbl_int_z) @ L_inv_dbl_int_z
+    # correction_term = tf.transpose(dbl_int_z) @ posterior.cache[0] @ dbl_int_z
     integral_variance = tf.squeeze(prior_term - correction_term)
     assert integral_variance >= 0, f'Integral variance negative. Prior term: {prior_term}, correction Term: {correction_term}'
     return integral_variance
