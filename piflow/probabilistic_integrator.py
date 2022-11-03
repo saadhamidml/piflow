@@ -142,7 +142,7 @@ class ProbabilisticIntegrator():
                 model.optimize(dataset)
         integrand_model = IntegrandModel(self._prior, model)
         _ = integrand_model.integral_posterior()  # Populate cache.
-        return  integrand_model
+        return  integrand_model, datasets
     
 
 # Ordinary Bayesian Quadrature
