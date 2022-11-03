@@ -153,7 +153,9 @@ def _bayesian_quadrature_mean(
 ):
     kernel_integral = tf.reshape(kernel_integral, (1, -1))
     posterior = model.posterior() if posterior == None else posterior
-    return tf.squeeze(kernel_integral @ posterior.cache[0] @ model.data[1])
+    return tf.squeeze(
+        kernel_integral @ tf.linalg.cholesky_solve(posterior.cache[1], posterior.cache[0])
+    )
 
 def _bayesian_quadrature_var(
     kernel_integral: tf.Tensor,
@@ -164,7 +166,9 @@ def _bayesian_quadrature_var(
     kernel_integral = tf.reshape(kernel_integral, (1, -1))
     posterior = model.posterior() if posterior == None else posterior
     return (
-        dbl_kernel_integral - kernel_integral @ posterior.cache[0] @ tf.transpose(kernel_integral)
+        dbl_kernel_integral - kernel_integral @ tf.linalg.cholesky_solve(
+            posterior.cache[1], tf.transpose(kernel_integral)
+        )
     )
 
 
@@ -307,7 +311,7 @@ def _wsabi_mean(
     kernel and Gaussian prior.
     """
     posterior = model.posterior() if posterior == None else posterior
-    K_inv_z = posterior.cache[0]  # [N, 1]
+    K_inv_z = tf.linalg.cholesky_solve(posterior.cache[1], posterior.cache[0])  # [N, 1]
     dbl_kernel_integral = _wsabi_double_kernel_integral(prior, model)
     integral_mean = tf.squeeze(
         model.alpha + 0.5 * (tf.transpose(K_inv_z) @ dbl_kernel_integral @ K_inv_z)
@@ -332,12 +336,12 @@ def _wsabi_variance(
     """
     posterior = model.posterior() if posterior == None else posterior
     X, Z = model.data
-    K_inv_z = posterior.cache[0]  # [N, 1]
+    K_inv_z = tf.linalg.cholesky_solve(posterior.cache[1], posterior.cache[0])  # [N, 1]
     triple_integral = _wsabi_triple_kernel_integral(prior, model)
     double_integral = _wsabi_double_kernel_integral(prior, model)
-    dbl_int_z = double_integral @ posterior.cache[0]
+    dbl_int_z = double_integral @ K_inv_z
     prior_term = tf.transpose(K_inv_z) @ triple_integral @ K_inv_z
-    L_inv_dbl_int_z = tf.linalg.cholesky_solve(posterior.cache[1], dbl_int_z)
+    L_inv_dbl_int_z = tf.linalg.triangular_solve(posterior.cache[1], dbl_int_z)
     correction_term = tf.transpose(L_inv_dbl_int_z) @ L_inv_dbl_int_z
     # correction_term = tf.transpose(dbl_int_z) @ posterior.cache[0] @ dbl_int_z
     integral_variance = tf.squeeze(prior_term - correction_term)
@@ -477,7 +481,7 @@ def _mmlt_var(
     f_mean2, _ = model.predict_f(samples2, posterior=posterior)
     covar_factors = f_mean1 * f_mean2
     cross_cov = tf.linalg.diag_part(kernel.K(samples1, samples2)) - tf.linalg.diag_part(
-        kernel.K(samples1, X) @ posterior.cache[0] @ kernel.K(X, samples2)
+        kernel.K(samples1, X) @ tf.linalg.cholesky_solve(posterior.cache[1], kernel.K(X, samples2))
     )
     integral_var = tf.reduce_sum(covar_factors * tf.math.expm1(cross_cov)) / num_samples
     assert integral_var >= 0
