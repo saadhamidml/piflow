@@ -7,8 +7,6 @@ import numpy as np
 import tensorflow as tf
 import tensorflow_probability as tfp
 
-from piflow.models.warped import WarpedGPR
-
 
 def initialise_hyperparameters(model: gpflow.models.GPR, num_samples: int = 100):
     """Sample from hyperparameter priors and initialise with the best.

@@ -248,8 +248,8 @@ class DataTransformMixin(TrainableProbabilisticModel):
             observations=self._observation_transformer.transform(dataset.observations),
         )
 
-    def _update_model_and_normalization_parameters(self, dataset: Dataset) -> None:
-        """Update the model and normalization parameters based on the new dataset.
+    def _update_normalization_parameters(self, dataset: Dataset) -> None:
+        """Update the normalization parameters based on the new dataset.
 
         :param dataset: New, unnormalized, dataset.
         """
@@ -332,7 +332,7 @@ class DataTransformMixin(TrainableProbabilisticModel):
         :param args: Arguments to pass to the model's `update` function.
         :param kwargs: Keyword arguments to pass to the model's `update` function.
         """
-        self._update_model_and_normalization_parameters(dataset)
+        self._update_normalization_parameters(dataset)
         transformed_dataset = self._transform_dataset(dataset)
         super().update(transformed_dataset, *args, **kwargs)  # type: ignore
 

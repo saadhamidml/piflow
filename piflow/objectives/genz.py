@@ -9,14 +9,17 @@ from gpmaniflow.utils import binomial_coef, factorial
 from trieste.space import Box
 
 class ContinuousFamily():
-    def __init__(self, dimension = 1, seed_u = None, a = None):
+    def __init__(self, dimension = 1, seed = None, a = None):
         self._dimension = dimension
         
         self.domain = Box([0.] * self._dimension, [1.] * self._dimension)
-        if seed_u is None:
-            self.u = tf.constant([0.5] * self._dimension, dtype = default_float())
-        else:
-            self.u = tf.random.uniform(shape = [1, self._dimension], dtype = default_float()) 
+        if seed is not None:
+            np.random.seed(seed)
+            tf.random.set_seed(seed)
+        # if seed is None:
+        #     self.u = tf.constant([0.5] * self._dimension, dtype = default_float())
+        # else:
+        self.u = tf.random.uniform(shape = [1, self._dimension], dtype = default_float()) 
         if a is None: 
             self.a = tf.constant([150/self._dimension ** 3] * self._dimension, dtype = default_float())
         else:
@@ -31,14 +34,17 @@ class ContinuousFamily():
         return f
 
 class CornerPeakFamily():
-    def __init__(self, dimension = 1, seed_u = None, a = None):
+    def __init__(self, dimension = 1, seed = None, a = None):
         self._dimension = dimension
         self.domain = Box([0.] * self._dimension, [1.] * self._dimension)
         
-        if seed_u is None:
-            self.u = tf.constant([0.5] * self._dimension, dtype = default_float())
-        else:
-            self.u = tf.random.uniform(shape = [1, self._dimension], dtype = default_float()) 
+        if seed is not None:
+            np.random.seed(seed)
+            tf.random.set_seed(seed)
+        # if seed is None:
+        #     self.u = tf.constant([0.5] * self._dimension, dtype = default_float())
+        # else:
+        self.u = tf.random.uniform(shape = [1, self._dimension], dtype = default_float()) 
         if a is None: 
             self.a = tf.constant([600/self._dimension ** 3] * self._dimension, dtype = default_float())
         else:
@@ -57,14 +63,17 @@ class CornerPeakFamily():
         return f
 
 class GaussianPeakFamily():
-    def __init__(self, dimension = 1, seed_u = None, a = None):
+    def __init__(self, dimension = 1, seed = None, a = None):
         self._dimension = dimension
         self.domain = Box([0.] * self._dimension, [1.] * self._dimension)
         
-        if seed_u is None:
-            self.u = tf.constant([0.5] * self._dimension, dtype = default_float())
-        else:
-            self.u = tf.random.uniform(shape = [1, self._dimension], dtype = default_float()) 
+        if seed is not None:
+            np.random.seed(seed)
+            tf.random.set_seed(seed)
+        # if seed is None:
+        #     self.u = tf.constant([0.5] * self._dimension, dtype = default_float())
+        # else:
+        self.u = tf.random.uniform(shape = [1, self._dimension], dtype = default_float()) 
         if a is None: 
             self.a = tf.constant([100/self._dimension ** 2] * self._dimension, dtype = default_float())
         else:
