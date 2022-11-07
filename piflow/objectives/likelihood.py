@@ -38,7 +38,7 @@ class GaussianMixtureSyntheticLikelihood():
         weighted_log_probs = (
             tf.reduce_sum(dists.log_prob(tf.expand_dims(x, 1)), -1) + tf.math.log(self.weights)
         )
-        return tf.math.reduce_logsumexp(weighted_log_probs, axis=-1, keepdims=True)
+        return tf.exp(tf.math.reduce_logsumexp(weighted_log_probs, axis=-1, keepdims=True))
 
 
 class BayesianLogisticRegressionLikelihood():
