@@ -8,7 +8,7 @@ import tensorflow_probability as tfp
 import trieste
 
 from piflow.models.transforms import (
-    DataTransformMixin, IdentityTransformer, StandardTransformer, MinMaxTransformer
+    DataTransformMixin, IdentityTransformer, StandardTransformer, MinMaxTransformer, ConstrainAverageTransformer
 )
 
 from .models.warped import WSABI_L_GPR, MMLT_GPR
@@ -73,6 +73,7 @@ class IntegrandModel():
                 not isinstance(self._model._observation_transformer, IdentityTransformer)
                 and not isinstance(self._model._observation_transformer, StandardTransformer)
                 and not isinstance(self._model._observation_transformer, MinMaxTransformer)
+                and not isinstance(self._model._observation_transformer, ConstrainAverageTransformer)
             ):
                 raise NotImplementedError
             # Assumes the prior integrates to 1.

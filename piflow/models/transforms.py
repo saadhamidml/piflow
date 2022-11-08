@@ -194,6 +194,59 @@ class MinMaxTransformer(DataTransformer):
         """
         return variance * self._delta ** 2
 
+class ConstrainAverageTransformer(DataTransformer):
+    """Transforms data to the unit cube, i.e. to the interval [0, 1], for all dimensions."""
+
+    def __init__(self, data: TensorType) -> None:
+        """Initialize a transformer that normalizes data to the unit cube.
+        
+        :param data: The unnormalized data [N, D].
+        """
+        super().__init__(data)
+
+    def set_parameters(self, data: TensorType) -> None:
+        """Set parameters of the transform; the average (self._average)
+
+        :param data: The unnormalized data [N, D].
+        """
+        self._average = tf.math.reduce_mean(data, axis = 0)
+
+    def transform(self, data: TensorType) -> TensorType:
+        """Scale data.
+
+        :param data: The unnormalized data. Shape must be [..., D] if transform operates over
+            multiple dimensions else any shape.
+        :return: The normalized data. Same shape as `data`.
+        """
+        return data / self._average
+
+    def inverse_transform(self, data: TensorType) -> TensorType:
+        """Transform normalized data to unnormalized space.
+
+        :param data: The normalized data. Shape [..., D] if transform operates over multiple
+            dimensions else any shape.
+        :return: The unnormalized data. Same shape as `data`.
+        """
+        return data * self._average
+
+#    def transform_variance(self, variance: TensorType) -> TensorType:
+#        """Transform the variance of unnormalized data to the variance of normalized data.
+#
+#        :param variance: The variance of the unnormalized data. Shape [..., D] if transform
+#            operates over multiple dimensions else any shape.
+#        :return: The variance of the normalized data. Same shape as `data`.
+#        """
+#        return variance / self._delta ** 2
+#
+#    def inverse_transform_variance(self, variance: TensorType) -> TensorType:
+#        """Transform the variance of normalized data to the variance of unnormalized data.
+#
+#        :param variance: The variance of the unnormalized data. Shape [..., D] if transform
+#            operates over multiple dimensions else any shape.
+#        :return: The variance of the normalized data. Same shape as `data`.
+#        """
+#        return variance * self._delta ** 2
+
 
 class DataTransformMixin(TrainableProbabilisticModel):
     """
