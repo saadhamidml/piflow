@@ -99,5 +99,7 @@ class UncertaintySamplingSampler():
     ) -> tf.Tensor:
         """Draw num_query_points samples from the posterior variance."""
         assert isinstance(prior, tfp.distributions.Uniform)
+        model = models['INTEGRAND']
+        dataset = datasets['INTEGRAND']
         print('Implement UncertaintySamplingSampler!')
         return search_space.sample(num_query_points)
