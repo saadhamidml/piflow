@@ -35,7 +35,7 @@ class AcquisitionFunctionBuilder(TAcquisitionFunctionBuilder):
         """Update an acquisition function."""
 
 
-class AcquisitionRule(TAcquisitionRule):
+class OptimizeAcquisition(TAcquisitionRule):
     def __init__(self, builder: AcquisitionFunctionBuilder) -> None:
         self._builder = builder
         self._optimizer = automatic_optimizer_selector
@@ -63,6 +63,21 @@ class AcquisitionRule(TAcquisitionRule):
                 prior
             )
         return self._optimizer(search_space, self._acquisition_function)
+
+
+class SampleAcquisition(TAcquisitionRule):
+    def __init__(self, sampler, num_query_points: int) -> None:
+        self._sampler = sampler
+        self._num_query_points = num_query_points
+    
+    def acquire(
+        self,
+        search_space: trieste.space.SearchSpace, 
+        models: Mapping[str, trieste.models.interfaces.TrainableProbabilisticModel],
+        datasets: Mapping[str, trieste.data.Dataset],
+        prior: tfp.distributions.Distribution
+    ) -> tf.Tensor:
+        return self._sampler(self._num_query_points, search_space, models, datasets, prior)
 
 
 class UncertaintySampling(AcquisitionFunctionBuilder):

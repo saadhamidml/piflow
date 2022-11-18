@@ -1,10 +1,12 @@
 from __future__ import annotations
+from typing import Mapping
 
 import tensorflow as tf
-from typing import Optional, Tuple, Union, cast
+import tensorflow_probability as tfp
 
 import gpflow
 from gpflow.utilities import is_variable
+import trieste
 from trieste.data import Dataset
 from trieste.models.gpflow.interface import GPflowPredictor
 from trieste.models.interfaces import TrainableProbabilisticModel
@@ -84,3 +86,18 @@ class _BezierProcessRegression(
 
 class BezierProcessRegression(DataTransformMixin, _BezierProcessRegression):
     pass
+
+
+class UncertaintySamplingSampler():
+    def __call__(
+        self,
+        num_query_points: int,
+        search_space: trieste.space.SearchSpace, 
+        models: Mapping[str, trieste.models.interfaces.TrainableProbabilisticModel],
+        datasets: Mapping[str, trieste.data.Dataset],
+        prior: tfp.distributions.Distribution
+    ) -> tf.Tensor:
+        """Draw num_query_points samples from the posterior variance."""
+        assert isinstance(prior, tfp.distributions.Uniform)
+        print('Implement UncertaintySamplingSampler!')
+        return search_space.sample(num_query_points)
