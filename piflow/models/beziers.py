@@ -28,15 +28,21 @@ class _BezierProcessRegression(
             ):
 
         if optimizer is None:
-            optimizer = BatchOptimizer(tf.optimizers.Adam(learning_rate = 0.01), batch_size=100, max_iter = 5000, compile=True)
-            # FIX OPTIMIZER
+            num_epochs = 10
+            batch_size = 128
+            optimizer = BatchOptimizer(
+                tf.optimizers.Adam(learning_rate = 0.01),
+                batch_size=batch_size,
+                max_iter=num_epochs * model.num_data / batch_size,
+                compile=True
+            )
 
         super().__init__(optimizer)
         
-        check_optimizer(self.optimizer)
-        
         self._model = model
         self._ensure_variable_model_data()
+        
+        check_optimizer(self.optimizer)
 
     def _ensure_variable_model_data(self) -> None:
         if self._model.num_data is None:
@@ -63,7 +69,17 @@ class _BezierProcessRegression(
         self.model.num_data.assign(num_data)
 
     def optimize(self, dataset: Dataset) -> None:
-        return super().optimize(dataset)
+        super().optimize(dataset)
+        elbo = self.model.maximum_log_likelihood_objective(dataset.astuple())
+        try:
+            parameters = self.model.get_parameters()
+            self.model.increment_orders()
+            super().optimise(dataset)
+            new_elbo = self.model.maximum_log_likelihood_objective(dataset.astuple())
+            if elbo > new_elbo:
+                self.model.set_parameters(parameters)
+        except:
+            print('Implement get_parameters(), increment_orders() and set_parameters()')
 
 
 class BezierProcessRegression(DataTransformMixin, _BezierProcessRegression):
