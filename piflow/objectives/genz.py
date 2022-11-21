@@ -8,14 +8,42 @@ from gpflow.config import default_float
 from gpmaniflow.utils import binomial_coef, factorial
 from trieste.space import Box
 
-class ContinuousFamily():
+
+class GenzFamily():
     def __init__(self, dimension = 1, seed = None, a = None):
         self._dimension = dimension
-        
         self.domain = Box([0.] * self._dimension, [1.] * self._dimension)
         if seed is not None:
             np.random.seed(seed)
             tf.random.set_seed(seed)
+    
+    def posterior_samples(self, num_samples: int, sample_factor: int = 16) -> tf.Tensor:
+        prior = tfp.distributions.Uniform(low=self.domain.lower, high=self.domain.upper)
+        success = False
+        while not success:
+            samples_ = prior.sample(int(num_samples * sample_factor))
+            prior_probs = prior.prob(samples_)
+            if prior_probs.ndim > 1:
+                prior_probs = tf.math.reduce_prod(prior_probs, axis=-1)
+            secondary_samples = tfp.distributions.Uniform(
+                low=tf.zeros_like(prior_probs), high=prior_probs
+            ).sample()
+            posterior_probs = tf.squeeze(self(samples_)) * prior_probs / self.integral_value
+            mask = posterior_probs < secondary_samples
+            try:
+                samples = tf.concat((samples, samples_[mask]))
+            except NameError as e:
+                samples = samples_[mask]
+            success = len(samples) >= num_samples
+        return samples[:num_samples]
+
+    def __call__(self, x: tf.Tensor) -> tf.Tensor:
+        raise NotImplementedError
+
+
+class ContinuousFamily(GenzFamily):
+    def __init__(self, dimension = 1, seed = None, a = None):
+        super().__init__(dimension, seed)
         # if seed is None:
         #     self.u = tf.constant([0.5] * self._dimension, dtype = default_float())
         # else:
@@ -33,14 +61,10 @@ class ContinuousFamily():
         f = tf.math.exp(-f)
         return f
 
-class CornerPeakFamily():
+
+class CornerPeakFamily(GenzFamily):
     def __init__(self, dimension = 1, seed = None, a = None):
-        self._dimension = dimension
-        self.domain = Box([0.] * self._dimension, [1.] * self._dimension)
-        
-        if seed is not None:
-            np.random.seed(seed)
-            tf.random.set_seed(seed)
+        super().__init__(dimension, seed)
         # if seed is None:
         #     self.u = tf.constant([0.5] * self._dimension, dtype = default_float())
         # else:
@@ -62,14 +86,10 @@ class CornerPeakFamily():
         f = f ** (-self._dimension - 1)
         return f
 
-class GaussianPeakFamily():
+
+class GaussianPeakFamily(GenzFamily):
     def __init__(self, dimension = 1, seed = None, a = None):
-        self._dimension = dimension
-        self.domain = Box([0.] * self._dimension, [1.] * self._dimension)
-        
-        if seed is not None:
-            np.random.seed(seed)
-            tf.random.set_seed(seed)
+        super().__init__(dimension, seed)
         # if seed is None:
         #     self.u = tf.constant([0.5] * self._dimension, dtype = default_float())
         # else:
@@ -86,6 +106,7 @@ class GaussianPeakFamily():
         f = tf.reduce_sum( self.a ** 2 * (x - self.u) ** 2, axis = 1, keepdims = True)
         f = tf.math.exp(-f)
         return f
+
 
 if __name__ == '__main__':
     M = ContinuousFamily(dimension = 4)
