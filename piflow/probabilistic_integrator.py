@@ -84,6 +84,77 @@ class IntegrandModel():
         return int_mean, int_variance
 
 
+class ProbabilisticPosterior(IntegrandModel):
+    """An object that characterises the posterior if IntegrandModel
+    models a likelihood function."""
+
+    def __init__(self, integrand_model: IntegrandModel) -> None:
+        super().__init__(integrand_model._prior, integrand_model._model)
+        self._integral_mean = integrand_model._integral_mean
+        self._integral_variance = integrand_model._integral_variance
+    
+    def sample(self, num_samples: int = 1, sample_factor: float = 16) -> tf.Tensor:
+        """Samples from the (mean function of the) posterior.
+        
+        :param num_samples: The number of samples, M.
+        :param sample_factor: The multiple of num_samples to sample from
+            the prior before rejection sampling.
+        :return: Samples [M, D].
+        """
+        try:
+            posterior = self._model._model.posterior()  # Populate caches.
+        except AttributeError as e:
+            # LogBezierProcess does not have kernel or caching.
+            posterior = None
+        success = False
+        while not success:
+            samples_ = self._prior.sample(int(num_samples * sample_factor))
+            prior_probs = self._prior.prob(samples_)
+            if prior_probs.ndim > 1:
+                prior_probs = tf.math.reduce_prod(prior_probs, axis=-1)
+            secondary_samples = tfp.distributions.Uniform(
+                low=tf.zeros_like(prior_probs), high=prior_probs
+            ).sample()
+            posterior_probs, _ = self(samples_, posterior=posterior)
+            mask = tf.squeeze(posterior_probs) < secondary_samples
+            try:
+                samples = tf.concat((samples, samples_[mask]))
+            except NameError as e:
+                samples = samples_[mask]
+            success = len(samples) >= num_samples
+        return samples[:num_samples]
+
+
+    def __call__(
+        self,
+        query_points: tf.Tensor,
+        full_cov: bool = False,
+        posterior: gpflow.posteriors.GPRPosterior = None
+    ) -> Tuple[tf.Tensor, tf.Tensor]:
+        """Query the posterior probability density at the given
+        locations.
+        
+        :param query_points: The query locations, shape [N, D].
+        :return: The probability density means [N, 1] and variances
+            [N, 1] or [N, N].
+        """
+        if posterior is not None:
+            mean, var = posterior.predict_f(query_points, full_cov=full_cov)
+        elif full_cov:
+            mean, var = self._model.predict_joint(query_points)
+        else:
+            mean, var = self._model.predict(query_points)
+        prior_probs = self._prior.prob(query_points)
+        if prior_probs.ndim > 1:
+            prior_probs = tf.math.reduce_prod(prior_probs, axis=-1)
+        factor = tf.reshape(prior_probs / self._integral_mean, (-1, 1))
+        if full_cov:
+            factor_sq = factor ** 2
+        else:
+            factor_sq = factor @ tf.reshape(factor, (1, -1))
+        return mean * factor, var * factor_sq
+
+
 class ProbabilisticIntegrator():
     """Performs probabilistic integration."""
 
