@@ -50,7 +50,8 @@ class BayesianLogisticRegressionLikelihood():
         train_targets: tf.Tensor = None,
         dimension: int = None,
         num_data: int = 1000,
-        seed: int = None
+        seed: int = None,
+        num_mc_samples: int = 10000
     ) -> None:
         """Initialise. self.integral_value assumes integration against
         a uniform measure on unit hypercube (shifted to be centred on the
@@ -73,7 +74,10 @@ class BayesianLogisticRegressionLikelihood():
             self.train_targets = tfp.distributions.Bernoulli(logits=bernoulli_logits).sample() 
         else:
             raise NotImplementedError
-        self.integral_value = np.nan  # TODO: Use MC to establish.
+        for i in range(num_mc_samples):
+            mc_samples = prior.sample(num_mc_samples)
+        integral_value = self(mc_samples).mean().item()
+        self.integral_value = integral_value
         
     def __call__(self, x: tf.Tensor) -> tf.Tensor:
         """Likelihood value at x.
@@ -101,7 +105,8 @@ class GaussianProcessRegressionLikelihood():
         train_targets: tf.Tensor = None,
         dimension: int = None,
         num_data: int = 100,
-        seed: int = None
+        seed: int = None,
+        num_mc_samples: int = 10000
     ) -> None:
         """Initialise. self.integral_value assumes integration against
         a uniform measure on the unit hypercube.
@@ -136,7 +141,10 @@ class GaussianProcessRegressionLikelihood():
         self.model = gpflow.models.GPR((self.train_inputs, self.train_targets), kernel=kernel)
         if self.hyperparameters is not None:
             self.model.likelihood.variance.assign(self.hyperparameters[1])
-        self.integral_value = np.nan  # TODO: Use MC to establish.
+        for i in range(num_mc_samples):
+            mc_samples = prior.sample(num_mc_samples)
+        integral_value = self(mc_samples).mean().item()
+        self.integral_value = integral_value
         
     def __call__(self, x: tf.Tensor) -> tf.Tensor:
         """Likelihood value at x.

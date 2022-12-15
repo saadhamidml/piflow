@@ -118,7 +118,7 @@ class ProbabilisticPosterior(IntegrandModel):
             posterior_probs, _ = self(samples_, posterior=posterior)
             mask = tf.squeeze(posterior_probs) < secondary_samples
             try:
-                samples = tf.concat((samples, samples_[mask]))
+                samples = tf.concat((samples, samples_[mask]), 0)
             except NameError as e:
                 samples = samples_[mask]
             success = len(samples) >= num_samples
@@ -142,16 +142,20 @@ class ProbabilisticPosterior(IntegrandModel):
             mean, var = posterior.predict_f(query_points, full_cov=full_cov)
         elif full_cov:
             mean, var = self._model.predict_joint(query_points)
+            var = tf.squeeze(var)
         else:
             mean, var = self._model.predict(query_points)
+            var = tf.reshape(var, (-1, 1))
+        mean = tf.reshape(mean, (-1, 1))
+
         prior_probs = self._prior.prob(query_points)
         if prior_probs.ndim > 1:
             prior_probs = tf.math.reduce_prod(prior_probs, axis=-1)
         factor = tf.reshape(prior_probs / self._integral_mean, (-1, 1))
         if full_cov:
-            factor_sq = factor ** 2
-        else:
             factor_sq = factor @ tf.reshape(factor, (1, -1))
+        else:
+            factor_sq = factor ** 2
         return mean * factor, var * factor_sq
 
 
