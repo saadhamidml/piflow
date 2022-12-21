@@ -103,3 +103,28 @@ class UncertaintySamplingSampler():
         dataset = datasets['INTEGRAND']
         print('Implement UncertaintySamplingSampler!')
         return search_space.sample(num_query_points)
+
+class BetaSampler():
+    def __call__(
+        self,
+        num_query_points: int,
+        search_space: trieste.space.SearchSpace,
+        optimum,
+        models: Mapping[str, trieste.models.interfaces.TrainableProbabilisticModel],
+        datasets: Mapping[str, trieste.data.Dataset],
+        prior: tfp.distributions.Distribution
+    ) -> tf.Tensor:
+         
+        #print(models)
+        model = models['INTEGRAND']
+        #print(model)
+        order = model.model.BB.orders[0]
+        #print(order)
+        gamma = model.model.BB.gamma
+        #print(gamma)
+        beta_dist = tfp.distributions.Beta(order*tf.squeeze(optimum,0)*2*gamma + 1. ,
+                (1. - tf.squeeze(optimum,0))*order*2*gamma + 1.)
+        out = beta_dist.sample(num_query_points)
+        #print(out)
+        return out 
+
