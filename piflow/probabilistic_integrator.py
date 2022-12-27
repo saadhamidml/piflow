@@ -531,7 +531,7 @@ def _mmlt_mean(
     posterior: gpflow.posteriors.GPRPosterior = None,
     num_samples: int = None
 ):
-    num_samples = 5000 * model.data[0].shape[1]
+    num_samples = min(4096 * model.data[0].shape[1], 32768)
     samples = prior.sample(num_samples)  # [N, D]
     mean, _ = model.predict_f(samples, posterior=posterior)
     return tf.math.reduce_mean(mean)
@@ -550,7 +550,7 @@ def _mmlt_var(
 ):  
     X, Z = model.data
     posterior = model.posterior() if posterior == None else posterior
-    num_samples = 5000 * X.shape[1]
+    num_samples = min(4096 * X.shape[1], 32768)
     samples1 = prior.sample(num_samples)
     samples2 = prior.sample(num_samples)
     f_mean1, _ = model.predict_f(samples1, posterior=posterior)

@@ -15,6 +15,7 @@ from trieste.models.gpflow.utils import check_optimizer
 from trieste.types import TensorType
 
 from gpmaniflow.models.BezierProcess import LogBezierProcess
+from gpmaniflow.surfaces import LogBezierButtress
 
 from piflow.models.transforms import DataTransformMixin
 
@@ -72,16 +73,33 @@ class _BezierProcessRegression(
 
     def optimize(self, dataset: Dataset) -> None:
         super().optimize(dataset)
-        elbo = self.model.maximum_log_likelihood_objective(dataset.astuple())
-        try:
-            parameters = self.model.get_parameters()
-            self.model.increment_orders()
-            super().optimise(dataset)
-            new_elbo = self.model.maximum_log_likelihood_objective(dataset.astuple())
-            if elbo > new_elbo:
-                self.model.set_parameters(parameters)
-        except:
-            print('Implement get_parameters(), increment_orders() and set_parameters()')
+        # cached_buttress = self.model.BB
+        # try:
+        #     max_order = 512 / len(self.model.orders)
+        #     try_increment_order = True
+        #     while try_increment_order and self.model.orders[0] < max_order:
+        #         elbo = self.model.maximum_log_likelihood_objective(dataset.astuple())
+        #         cached_buttress = self.model.BB
+        #         self.model.orders = [o + 1 for o in self.model.orders]
+        #         self.model.BB = LogBezierButtress(
+        #             input_dim=self.model.input_dim,
+        #             orders=self.model.orders,
+        #             muN=self.model.muN,
+        #             sigma2N=self.model.sigma2N,
+        #             perm=cached_buttress.perm,
+        #             num_perm=self.model.num_perm
+        #         )
+        #         self.model.BB.gamma.prior = tfp.distributions.Exponential(
+        #             gpflow.utilities.to_default_float(0.5)
+        #         )
+        #         super().optimize(dataset)
+        #         new_elbo = self.model.maximum_log_likelihood_objective(dataset.astuple())
+        #         if elbo > new_elbo:
+        #             self.model.BB = cached_buttress
+        #             self.model.orders = self.model.BB.orders
+        #             try_increment_order = False
+        # except:
+        #     self.model.BB = cached_buttress
 
 
 class BezierProcessRegression(DataTransformMixin, _BezierProcessRegression):

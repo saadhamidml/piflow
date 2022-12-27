@@ -17,17 +17,30 @@ class GaussianMixtureSyntheticLikelihood():
             np.random.seed(seed)
             tf.random.set_seed(seed)
         num_components = np.random.randint(5, 14)
-        means = (100 * (np.random.rand(num_components, dimension) - 0.5)).tolist()
-        scales = np.random.randint(
+        means = np.random.rand(num_components, dimension).tolist()
+        scales = (np.random.randint(
             11, 19, size=(num_components, dimension)
-        ).tolist()
+        ) / 100).tolist()
         weights = np.random.dirichlet(np.ones(num_components)).tolist()
         self.weights = tf.constant(weights, dtype=default_float())
         self.means = tf.constant(means, dtype=default_float())
         self.scales = tf.constant(scales, dtype=default_float())
         # Weighted sum of the integrals for each Gaussian.
-        self.integral_value = np.nan
-        
+        dists = tfp.distributions.Normal(self.means, self.scales)
+        cdf_diffs = dists.cdf(tf.ones_like(self.means)) - dists.cdf(tf.zeros_like(self.means))
+        self.integral_value = tf.math.reduce_sum(self.weights * tf.math.reduce_prod(cdf_diffs, -1))
+    
+    def posterior_samples(self, num_samples: int, sample_factor: int = 16) -> tf.Tensor:
+        indices = tfp.distributions.Categorical(probs=self.weights).sample(num_samples)
+        indices = tf.sort(indices)  # So count order is correct
+        _, _, counts = tf.unique_with_counts(indices)
+        samples = []
+        for i, (m, s) in enumerate(zip(self.means, self.scales)):
+            samples.append(tfp.distributions.TruncatedNormal(
+                m, s, tf.zeros_like(m), tf.ones_like(m)
+            ).sample(counts[i]))
+        return tf.concat(samples, 0)
+
     def __call__(self, x: tf.Tensor) -> tf.Tensor:
         """Likelihood value at x.
         
