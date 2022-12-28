@@ -66,10 +66,13 @@ class OptimizeAcquisition(TAcquisitionRule):
 
 
 class SampleAcquisition(TAcquisitionRule):
-    def __init__(self, sampler, num_query_points: int) -> None:
+    def __init__(self, builder: AcquisitionFunctionBuilder, sampler, num_query_points: int) -> None:
+        self._builder = builder
+        self._optimizer = automatic_optimizer_selector
         self._sampler = sampler
         self._num_query_points = num_query_points
-    
+        self._acquisition_function = None
+
     def acquire(
         self,
         search_space: trieste.space.SearchSpace, 
@@ -77,7 +80,22 @@ class SampleAcquisition(TAcquisitionRule):
         datasets: Mapping[str, trieste.data.Dataset],
         prior: tfp.distributions.Distribution
     ) -> tf.Tensor:
-        return self._sampler(self._num_query_points, search_space, models, datasets, prior)
+        if self._acquisition_function is None:
+            self._acquisition_function = self._builder.prepare_acquisition_function(
+                models['INTEGRAND'],
+                datasets['INTEGRAND'],
+                prior
+            )
+        else:
+            self._acquisition_function = self._builder.update_acquisition_function(
+                self._acquisition_function,
+                models['INTEGRAND'],
+                datasets['INTEGRAND'],
+                prior
+            )
+        optimum = self._optimizer(search_space, self._acquisition_function)
+        print('Optimal value:', optimum)
+        return self._sampler(self._num_query_points, search_space, optimum, models, datasets, prior)
 
 
 class UncertaintySampling(AcquisitionFunctionBuilder):
