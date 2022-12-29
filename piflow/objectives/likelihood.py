@@ -59,12 +59,14 @@ class BayesianLogisticRegressionLikelihood():
 
     def __init__(
         self,
+        prior: tfp.distributions.Distribution,
         train_inputs: tf.Tensor = None,
         train_targets: tf.Tensor = None,
         dimension: int = None,
         num_data: int = 1000,
         seed: int = None,
-        num_mc_samples: int = 10000
+        num_mc_samples: int = 10000,
+        integral_value: float = None
     ) -> None:
         """Initialise. self.integral_value assumes integration against
         a uniform measure on unit hypercube (shifted to be centred on the
@@ -73,23 +75,25 @@ class BayesianLogisticRegressionLikelihood():
         if seed is not None:
             np.random.seed(seed)
             tf.random.set_seed(seed)
+        # prior = tfp.distributions.Uniform(
+        #     low=tf.cast([-0.5] * dimension, tf.float64),
+        #     high=tf.cast([0.5] * dimension, tf.float64)
+        # )
         if train_inputs is None:
             if dimension is None:
                 raise TypeError('One of train_inputs or dimension must be specified.')
-            prior = tfp.distributions.Uniform(
-                low=tf.cast([-0.5] * dimension, tf.float64),
-                high=tf.cast([0.5] * dimension, tf.float64)
-            )
             self.weights = tf.expand_dims(prior.sample(), -1)  # [D, 1]
             self.train_inputs = tf.random.normal((num_data, dimension), dtype=default_float())  # [N, D]
             bernoulli_logits = self.train_inputs @ self.weights  # [N, 1]
             # [N, 1]
             self.train_targets = tfp.distributions.Bernoulli(logits=bernoulli_logits).sample() 
         else:
-            raise NotImplementedError
-        for i in range(num_mc_samples):
-            mc_samples = prior.sample(num_mc_samples)
-        integral_value = self(mc_samples).mean().item()
+            self.train_inputs = train_inputs
+            self.train_targets = train_targets
+        if integral_value is None:
+            for i in range(num_mc_samples):
+                mc_samples = prior.sample(num_mc_samples)
+            integral_value = self(mc_samples).mean().item()
         self.integral_value = integral_value
         
     def __call__(self, x: tf.Tensor) -> tf.Tensor:
@@ -114,12 +118,14 @@ class GaussianProcessRegressionLikelihood():
 
     def __init__(
         self,
+        prior: tfp.distributions.Distribution,
         train_inputs: tf.Tensor = None,
         train_targets: tf.Tensor = None,
         dimension: int = None,
         num_data: int = 100,
         seed: int = None,
-        num_mc_samples: int = 10000
+        num_mc_samples: int = 10000,
+        integral_value: float = None
     ) -> None:
         """Initialise. self.integral_value assumes integration against
         a uniform measure on the unit hypercube.
@@ -127,16 +133,16 @@ class GaussianProcessRegressionLikelihood():
         if seed is not None:
             np.random.seed(seed)
             tf.random.set_seed(seed)
-        kernel = gpflow.kernels.RBF(lengthscales=tf.ones(dimension, dtype=default_float()))
+        # prior = tfp.distributions.Uniform(
+        #     low=tf.cast([1.0, 0.01] + [1e-6] * dimension, tf.float64),
+        #     high=tf.cast([10.0, 0.1] + [1.0] * dimension, tf.float64)
+        # )
+        kernel = gpflow.kernels.Matern12(lengthscales=tf.ones(dimension, dtype=default_float()))
         if train_inputs is None:
             if dimension is None:
                 raise TypeError('One of train_inputs or dimension must be specified.')
-            prior = tfp.distributions.Uniform(
-                low=tf.cast([1.0, 0.01] + [1e-6] * dimension, tf.float64),
-                high=tf.cast([10.0, 0.1] + [1.0] * dimension, tf.float64)
-            )
             # [signal_variance, noise_variance, lengthscales]
-            self.hyperparameters = prior.sample()
+            self.hyperparameters = self.prior.sample()
             # [N, D]
             self.train_inputs = tf.random.normal((num_data, dimension), dtype=default_float())
             kernel.variance.assign(self.hyperparameters[0])
@@ -154,9 +160,10 @@ class GaussianProcessRegressionLikelihood():
         self.model = gpflow.models.GPR((self.train_inputs, self.train_targets), kernel=kernel)
         if self.hyperparameters is not None:
             self.model.likelihood.variance.assign(self.hyperparameters[1])
-        for i in range(num_mc_samples):
-            mc_samples = prior.sample(num_mc_samples)
-        integral_value = self(mc_samples).mean().item()
+        if integral_value is None:
+            for i in range(num_mc_samples):
+                mc_samples = prior.sample(num_mc_samples)
+            integral_value = self(mc_samples).mean().item()
         self.integral_value = integral_value
         
     def __call__(self, x: tf.Tensor) -> tf.Tensor:
