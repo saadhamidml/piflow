@@ -1,5 +1,6 @@
 from abc import abstractmethod
 from typing import Mapping, Union
+import logging
 import tensorflow as tf
 import tensorflow_probability as tfp
 import trieste
@@ -10,6 +11,9 @@ from trieste.acquisition.interface import (
 )
 from trieste.acquisition.rule import AcquisitionRule as TAcquisitionRule
 from trieste.acquisition.optimizer import automatic_optimizer_selector
+
+
+logger = logging.getLogger(__name__)
 
 
 class AcquisitionFunctionBuilder(TAcquisitionFunctionBuilder):
@@ -94,7 +98,7 @@ class SampleAcquisition(TAcquisitionRule):
                 prior
             )
         optimum = self._optimizer(search_space, self._acquisition_function)
-        print('Optimal value:', optimum)
+        logger.debug('Acquisiton function optimal value:', optimum)
         return self._sampler(self._num_query_points, search_space, optimum, models, datasets, prior)
 
 

@@ -198,24 +198,27 @@ class ProbabilisticIntegrator():
                 model.optimize(dataset)
         for step in range(1, num_steps + 1):
             logger.info(f'PI acquisition {step}/{num_steps}')
-            # Make an acquisition.
-            query_points = acquistion_rule.acquire(
-                self._search_space, models, datasets=datasets, prior=self._prior
-            )
-            print("Query:", query_points.numpy())
-            observer_output = self._observer(query_points)
-            print("Observed:", observer_output.observations.numpy())
-            tagged_output = (
-                observer_output
-                if isinstance(observer_output, Mapping)
-                else {'INTEGRAND': observer_output}
-            )
-            datasets = {tag: datasets[tag] + tagged_output[tag] for tag in tagged_output}
-            # Update and optimise the model.
-            for tag, model in models.items():
-                dataset = datasets[tag]
-                model.update(dataset)
-                model.optimize(dataset)
+            try:
+                # Make an acquisition.
+                query_points = acquistion_rule.acquire(
+                    self._search_space, models, datasets=datasets, prior=self._prior
+                )
+                print("Query:", query_points.numpy())
+                observer_output = self._observer(query_points)
+                print("Observed:", observer_output.observations.numpy())
+                tagged_output = (
+                    observer_output
+                    if isinstance(observer_output, Mapping)
+                    else {'INTEGRAND': observer_output}
+                )
+                datasets = {tag: datasets[tag] + tagged_output[tag] for tag in tagged_output}
+                # Update and optimise the model.
+                for tag, model in models.items():
+                    dataset = datasets[tag]
+                    model.update(dataset)
+                    model.optimize(dataset)
+            except Exception as e:
+                pass
         integrand_model = IntegrandModel(self._prior, model)
         _ = integrand_model.integral_posterior()  # Populate cache.
         return  integrand_model, datasets
