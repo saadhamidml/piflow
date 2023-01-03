@@ -37,7 +37,7 @@ class GenzFamily():
             success = len(samples) >= num_samples
         return samples[:num_samples]
 
-    def __call__(self, x: tf.Tensor) -> tf.Tensor:
+    def __call__(self, x: tf.Tensor, return_log: bool = False) -> tf.Tensor:
         raise NotImplementedError
 
 
@@ -55,11 +55,13 @@ class ContinuousFamily(GenzFamily):
         
         self.integral_value = tf.reduce_prod(2 / self.a * (1 - 0.5*tf.math.exp(-self.a * (1 - self.u)) - 0.5*tf.math.exp(-self.a*self.u)))
         
-    def __call__(self, x: tf.Tensor) -> tf.Tensor:
+    def __call__(self, x: tf.Tensor, return_log: bool = False) -> tf.Tensor:
         f = self.a * tf.math.abs(x - self.u)
         f = tf.reduce_sum(f, axis = 1, keepdims = True)
-        f = tf.math.exp(-f)
-        return f
+        if return_log:
+            return -f
+        else:
+            return tf.math.exp(-f)
 
 
 class CornerPeakFamily(GenzFamily):
@@ -81,10 +83,12 @@ class CornerPeakFamily(GenzFamily):
         else:
             print("Integral value not analytical for this choice of a")
         
-    def __call__(self, x: tf.Tensor) -> tf.Tensor:
+    def __call__(self, x: tf.Tensor, return_log: bool = False) -> tf.Tensor:
         f = 1 + tf.reduce_sum(self.a * x, axis = 1, keepdims = True)
-        f = f ** (-self._dimension - 1)
-        return f
+        if return_log:
+            return (-self._dimension - 1) * tf.math.log(f)
+        else:
+            return f ** (-self._dimension - 1)
 
 
 class GaussianPeakFamily(GenzFamily):
@@ -102,10 +106,12 @@ class GaussianPeakFamily(GenzFamily):
         vec = 1 / self.a * ( G.cdf(2 ** 0.5 * self.a * (1-self.u)) - G.cdf(- 2 ** 0.5 * self.a * self.u))
         self.integral_value = pi ** (self._dimension / 2) * tf.reduce_prod(vec)
 
-    def __call__(self, x: tf.Tensor) -> tf.Tensor:
+    def __call__(self, x: tf.Tensor, return_log: bool = False) -> tf.Tensor:
         f = tf.reduce_sum( self.a ** 2 * (x - self.u) ** 2, axis = 1, keepdims = True)
-        f = tf.math.exp(-f)
-        return f
+        if return_log:
+            return -f
+        else:
+            return tf.math.exp(-f)
 
 
 if __name__ == '__main__':
@@ -114,4 +120,3 @@ if __name__ == '__main__':
     C = CornerPeakFamily(dimension = 3)
     C = CornerPeakFamily(dimension = 10)
     G = GaussianPeakFamily(dimension = 3)
-

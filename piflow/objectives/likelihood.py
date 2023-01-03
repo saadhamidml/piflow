@@ -41,7 +41,7 @@ class GaussianMixtureSyntheticLikelihood():
             ).sample(counts[i]))
         return tf.concat(samples, 0)
 
-    def __call__(self, x: tf.Tensor) -> tf.Tensor:
+    def __call__(self, x: tf.Tensor, return_log: bool = False) -> tf.Tensor:
         """Likelihood value at x.
         
         :param x: Query locations, shape [N, D].
@@ -51,7 +51,11 @@ class GaussianMixtureSyntheticLikelihood():
         weighted_log_probs = (
             tf.reduce_sum(dists.log_prob(tf.expand_dims(x, 1)), -1) + tf.math.log(self.weights)
         )
-        return tf.exp(tf.math.reduce_logsumexp(weighted_log_probs, axis=-1, keepdims=True))
+        log_lik = tf.math.reduce_logsumexp(weighted_log_probs, axis=-1, keepdims=True)
+        if return_log:
+            return log_lik
+        else:
+            return tf.exp(log_lik)
 
 
 class BayesianLogisticRegressionLikelihood():
@@ -66,7 +70,8 @@ class BayesianLogisticRegressionLikelihood():
         num_data: int = 1000,
         seed: int = None,
         num_mc_samples: int = 10000,
-        integral_value: float = None
+        integral_value: float = None,
+        log_shift: float = 0.0
     ) -> None:
         """Initialise. self.integral_value assumes integration against
         a uniform measure on unit hypercube (shifted to be centred on the
@@ -95,8 +100,9 @@ class BayesianLogisticRegressionLikelihood():
                 mc_samples = prior.sample(num_mc_samples)
             integral_value = self(mc_samples).mean().item()
         self.integral_value = integral_value
+        self.log_shift = log_shift
         
-    def __call__(self, x: tf.Tensor) -> tf.Tensor:
+    def __call__(self, x: tf.Tensor, return_log: bool = False) -> tf.Tensor:
         """Likelihood value at x.
         
         :param x: Query locations, shape [M, D].
@@ -108,9 +114,11 @@ class BayesianLogisticRegressionLikelihood():
         ), -1)  # [M, N]
         dist = tfp.distributions.Bernoulli(logits=logits)
         # [M]
-        return tf.exp(
-            tf.reduce_sum(dist.log_prob(self.train_targets[:, 0]), axis=-1, keepdims=True)
-        )
+        log_lik = tf.reduce_sum(dist.log_prob(self.train_targets[:, 0]), axis=-1, keepdims=True) - self.log_shift
+        if return_log:
+            return log_lik
+        else:
+            return tf.exp(log_lik)
 
 
 class GaussianProcessRegressionLikelihood():
@@ -125,7 +133,8 @@ class GaussianProcessRegressionLikelihood():
         num_data: int = 100,
         seed: int = None,
         num_mc_samples: int = 10000,
-        integral_value: float = None
+        integral_value: float = None,
+        log_shift: float = 0.0
     ) -> None:
         """Initialise. self.integral_value assumes integration against
         a uniform measure on the unit hypercube.
@@ -165,8 +174,9 @@ class GaussianProcessRegressionLikelihood():
                 mc_samples = prior.sample(num_mc_samples)
             integral_value = self(mc_samples).mean().item()
         self.integral_value = integral_value
+        self.log_shift = log_shift
         
-    def __call__(self, x: tf.Tensor) -> tf.Tensor:
+    def __call__(self, x: tf.Tensor, return_log: bool = False) -> tf.Tensor:
         """Likelihood value at x.
         
         :param x: Query locations, shape [N, D].
@@ -178,4 +188,8 @@ class GaussianProcessRegressionLikelihood():
             self.model.kernel.lengthscales.assign(xi[2:])
             self.model.likelihood.variance.assign(xi[1])
             lmls.append(self.model.log_marginal_likelihood())
-        return tf.reshape(tf.exp(lmls), (-1, 1))
+        log_lik = tf.reshape(lmls, (-1, 1)) - self.log_shift
+        if return_log:
+            return log_lik
+        else:
+            return tf.exp(log_lik)
