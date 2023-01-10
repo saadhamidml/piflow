@@ -10,7 +10,9 @@ from trieste.acquisition.interface import (
     AcquisitionFunctionClass
 )
 from trieste.acquisition.rule import AcquisitionRule as TAcquisitionRule
-from trieste.acquisition.optimizer import automatic_optimizer_selector
+from trieste.acquisition.optimizer import (
+    automatic_optimizer_selector, generate_continuous_optimizer
+)
 
 
 logger = logging.getLogger(__name__)
@@ -42,7 +44,10 @@ class AcquisitionFunctionBuilder(TAcquisitionFunctionBuilder):
 class OptimizeAcquisition(TAcquisitionRule):
     def __init__(self, builder: AcquisitionFunctionBuilder) -> None:
         self._builder = builder
-        self._optimizer = automatic_optimizer_selector
+        self._optimizer = generate_continuous_optimizer(
+                num_initial_samples=8192,
+                num_optimization_runs=16,
+            )
         self._num_query_points = 1
         self._acquisition_function = None
     

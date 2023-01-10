@@ -200,9 +200,9 @@ class ProbabilisticIntegrator():
             logger.info(f'PI acquisition {step}/{num_steps}')
             try:
                 # Make an acquisition.
-                query_points = acquistion_rule.acquire(
+                query_points = tf.stop_gradient(acquistion_rule.acquire(
                     self._search_space, models, datasets=datasets, prior=self._prior
-                )
+                ))
                 print("Query:", query_points.numpy())
                 observer_output = self._observer(query_points)
                 print("Observed:", observer_output.observations.numpy())
