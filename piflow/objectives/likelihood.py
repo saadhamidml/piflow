@@ -47,6 +47,8 @@ class GaussianMixtureSyntheticLikelihood():
         :param x: Query locations, shape [N, D].
         :return: The likelihood values at x, shape [N, 1].
         """
+        if len(x.shape) < 2:
+            x = tf.reshape(x, (1, -1))
         dists = tfp.distributions.Normal(self.means, self.scales)
         weighted_log_probs = (
             tf.reduce_sum(dists.log_prob(tf.expand_dims(x, 1)), -1) + tf.math.log(self.weights)
@@ -108,6 +110,8 @@ class BayesianLogisticRegressionLikelihood():
         :param x: Query locations, shape [M, D].
         :return: The likelihood values at x, shape [M, 1].
         """
+        if len(x.shape) < 2:
+            x = tf.reshape(x, (1, -1))
         logits = tf.squeeze(tf.linalg.matmul(
             tf.expand_dims(self.train_inputs, 0),  # [1, N, D]
             tf.expand_dims(x, -1)  # [M, D, 1]
@@ -182,6 +186,8 @@ class GaussianProcessRegressionLikelihood():
         :param x: Query locations, shape [N, D].
         :return: The likelihood values at x, shape [N, 1].
         """
+        if len(x.shape) < 2:
+            x = tf.reshape(x, (1, -1))
         lmls = []
         for xi in x:
             self.model.kernel.variance.assign(xi[0])
