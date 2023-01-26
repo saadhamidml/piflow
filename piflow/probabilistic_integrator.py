@@ -7,8 +7,14 @@ import tensorflow as tf
 import tensorflow_probability as tfp
 import trieste
 
-from .models import WSABI_L_GPR, MMLT_GPR
+from piflow.models.transforms import (
+    DataTransformMixin, IdentityTransformer, StandardTransformer, MinMaxTransformer, ConstrainAverageTransformer
+)
 
+from .models.warped import WSABI_L_GPR, MMLT_GPR
+from gpmaniflow.models import LogBezierProcess
+
+NoneType = type(None)
 
 logger = logging.getLogger(__name__)
 
@@ -35,12 +41,16 @@ class IntegrandModel():
         :return: Integral mean, scalar; integral standard deviation,
             scalar.
         """
-        posterior = self._model._model.posterior()  # Populate caches.
+        try:
+            posterior = self._model._model.posterior()  # Populate caches.
+        except AttributeError as e:
+            # LogBezierProcess does not have kernel or caching.
+            posterior = None
         if self._integral_mean is None:
             int_mean = integral_mean(
                 self._prior,
                 self._model._model,
-                self._model._model.kernel,  # Included in function signature for multiple dispatch.
+                self._model.get_kernel(),  # Included in function signature for multiple dispatch.
                 posterior=posterior
             )
             self._integral_mean = int_mean
@@ -50,13 +60,103 @@ class IntegrandModel():
             int_variance = integral_variance(
                 self._prior,
                 self._model._model,
-                self._model._model.kernel,  # Included in function signature for multiple dispatch.
+                self._model.get_kernel(),  # Included in function signature for multiple dispatch.
                 posterior=posterior
             )
             self._integral_variance = int_variance
         else:
             int_variance = self._integral_variance
+        if isinstance(self._model, DataTransformMixin):
+            if not isinstance(self._model._query_point_transformer, IdentityTransformer):
+                raise NotImplementedError
+            if (
+                not isinstance(self._model._observation_transformer, IdentityTransformer)
+                and not isinstance(self._model._observation_transformer, StandardTransformer)
+                and not isinstance(self._model._observation_transformer, MinMaxTransformer)
+                and not isinstance(self._model._observation_transformer, ConstrainAverageTransformer)
+            ):
+                raise NotImplementedError
+            # Assumes the prior integrates to 1.
+            int_mean = self._model._observation_transformer.inverse_transform(int_mean)
+            int_variance = self._model._observation_transformer.inverse_transform_variance(
+                int_variance
+            )
         return int_mean, int_variance
+
+
+class ProbabilisticPosterior(IntegrandModel):
+    """An object that characterises the posterior if IntegrandModel
+    models a likelihood function."""
+
+    def __init__(self, integrand_model: IntegrandModel) -> None:
+        super().__init__(integrand_model._prior, integrand_model._model)
+        self._integral_mean = integrand_model._integral_mean
+        self._integral_variance = integrand_model._integral_variance
+    
+    def sample(self, num_samples: int = 1, sample_factor: float = 16) -> tf.Tensor:
+        """Samples from the (mean function of the) posterior.
+        
+        :param num_samples: The number of samples, M.
+        :param sample_factor: The multiple of num_samples to sample from
+            the prior before rejection sampling.
+        :return: Samples [M, D].
+        """
+        try:
+            posterior = self._model._model.posterior()  # Populate caches.
+        except AttributeError as e:
+            # LogBezierProcess does not have kernel or caching.
+            posterior = None
+        success = False
+        while not success:
+            samples_ = self._prior.sample(int(num_samples * sample_factor))
+            prior_probs = self._prior.prob(samples_)
+            if prior_probs.ndim > 1:
+                prior_probs = tf.math.reduce_prod(prior_probs, axis=-1)
+            secondary_samples = tfp.distributions.Uniform(
+                low=tf.zeros_like(prior_probs), high=prior_probs
+            ).sample()
+            posterior_probs, _ = self(samples_, posterior=posterior)
+            mask = tf.squeeze(posterior_probs) < secondary_samples
+            try:
+                samples = tf.concat((samples, samples_[mask]), 0)
+            except NameError as e:
+                samples = samples_[mask]
+            success = len(samples) >= num_samples
+        return samples[:num_samples]
+
+
+    def __call__(
+        self,
+        query_points: tf.Tensor,
+        full_cov: bool = False,
+        posterior: gpflow.posteriors.GPRPosterior = None
+    ) -> Tuple[tf.Tensor, tf.Tensor]:
+        """Query the posterior probability density at the given
+        locations.
+        
+        :param query_points: The query locations, shape [N, D].
+        :return: The probability density means [N, 1] and variances
+            [N, 1] or [N, N].
+        """
+        if posterior is not None:
+            mean, var = posterior.predict_f(query_points, full_cov=full_cov)
+        elif full_cov:
+            mean, var = self._model.predict_joint(query_points)
+            var = tf.squeeze(var)
+        else:
+            mean, var = self._model.predict(query_points)
+            var = tf.reshape(var, (-1, 1))
+        mean = tf.reshape(mean, (-1, 1))
+
+        prior_probs = self._prior.prob(query_points)
+        if prior_probs.ndim > 1:
+            prior_probs = tf.math.reduce_prod(prior_probs, axis=-1)
+        factor = tf.reshape(prior_probs / self._integral_mean, (-1, 1))
+        if full_cov:
+            factor_sq = factor @ tf.reshape(factor, (1, -1))
+        else:
+            factor_sq = factor ** 2
+        return mean * factor, var * factor_sq
 
 
 class ProbabilisticIntegrator():
@@ -98,25 +198,30 @@ class ProbabilisticIntegrator():
                 model.optimize(dataset)
         for step in range(1, num_steps + 1):
             logger.info(f'PI acquisition {step}/{num_steps}')
-            # Make an acquisition.
-            query_points = acquistion_rule.acquire(
-                self._search_space, models, datasets=datasets, prior=self._prior
-            )
-            observer_output = self._observer(query_points)
-            tagged_output = (
-                observer_output
-                if isinstance(observer_output, Mapping)
-                else {'INTEGRAND': observer_output}
-            )
-            datasets = {tag: datasets[tag] + tagged_output[tag] for tag in tagged_output}
-            # Update and optimise the model.
-            for tag, model in models.items():
-                dataset = datasets[tag]
-                model.update(dataset)
-                model.optimize(dataset)
+            try:
+                # Make an acquisition.
+                query_points = tf.stop_gradient(acquistion_rule.acquire(
+                    self._search_space, models, datasets=datasets, prior=self._prior
+                ))
+                print("Query:", query_points.numpy())
+                observer_output = self._observer(query_points)
+                print("Observed:", observer_output.observations.numpy())
+                tagged_output = (
+                    observer_output
+                    if isinstance(observer_output, Mapping)
+                    else {'INTEGRAND': observer_output}
+                )
+                datasets = {tag: datasets[tag] + tagged_output[tag] for tag in tagged_output}
+                # Update and optimise the model.
+                for tag, model in models.items():
+                    dataset = datasets[tag]
+                    model.update(dataset)
+                    model.optimize(dataset)
+            except Exception as e:
+                pass
         integrand_model = IntegrandModel(self._prior, model)
         _ = integrand_model.integral_posterior()  # Populate cache.
-        return  integrand_model
+        return  integrand_model, datasets
     
 
 # Ordinary Bayesian Quadrature
@@ -127,7 +232,9 @@ def _bayesian_quadrature_mean(
 ):
     kernel_integral = tf.reshape(kernel_integral, (1, -1))
     posterior = model.posterior() if posterior == None else posterior
-    return tf.squeeze(kernel_integral @ posterior.cache[0] @ model.data[1])
+    return tf.squeeze(
+        kernel_integral @ tf.linalg.cholesky_solve(posterior.cache[1], posterior.cache[0])
+    )
 
 def _bayesian_quadrature_var(
     kernel_integral: tf.Tensor,
@@ -138,7 +245,9 @@ def _bayesian_quadrature_var(
     kernel_integral = tf.reshape(kernel_integral, (1, -1))
     posterior = model.posterior() if posterior == None else posterior
     return (
-        dbl_kernel_integral - kernel_integral @ posterior.cache[0] @ tf.transpose(kernel_integral)
+        dbl_kernel_integral - kernel_integral @ tf.linalg.cholesky_solve(
+            posterior.cache[1], tf.transpose(kernel_integral)
+        )
     )
 
 
@@ -281,7 +390,7 @@ def _wsabi_mean(
     kernel and Gaussian prior.
     """
     posterior = model.posterior() if posterior == None else posterior
-    K_inv_z = posterior.cache[0] @ model.data[1]  # [N, 1]
+    K_inv_z = tf.linalg.cholesky_solve(posterior.cache[1], posterior.cache[0])  # [N, 1]
     dbl_kernel_integral = _wsabi_double_kernel_integral(prior, model)
     integral_mean = tf.squeeze(
         model.alpha + 0.5 * (tf.transpose(K_inv_z) @ dbl_kernel_integral @ K_inv_z)
@@ -306,12 +415,14 @@ def _wsabi_variance(
     """
     posterior = model.posterior() if posterior == None else posterior
     X, Z = model.data
-    K_inv_z = posterior.cache[0] @ Z  # [N, 1]
+    K_inv_z = tf.linalg.cholesky_solve(posterior.cache[1], posterior.cache[0])  # [N, 1]
     triple_integral = _wsabi_triple_kernel_integral(prior, model)
     double_integral = _wsabi_double_kernel_integral(prior, model)
-    dbl_int_z = double_integral @ posterior.cache[0] @ Z
+    dbl_int_z = double_integral @ K_inv_z
     prior_term = tf.transpose(K_inv_z) @ triple_integral @ K_inv_z
-    correction_term = tf.transpose(dbl_int_z) @ posterior.cache[0] @ dbl_int_z
+    L_inv_dbl_int_z = tf.linalg.triangular_solve(posterior.cache[1], dbl_int_z)
+    correction_term = tf.transpose(L_inv_dbl_int_z) @ L_inv_dbl_int_z
+    # correction_term = tf.transpose(dbl_int_z) @ posterior.cache[0] @ dbl_int_z
     integral_variance = tf.squeeze(prior_term - correction_term)
     assert integral_variance >= 0, f'Integral variance negative. Prior term: {prior_term}, correction Term: {correction_term}'
     return integral_variance
@@ -423,7 +534,7 @@ def _mmlt_mean(
     posterior: gpflow.posteriors.GPRPosterior = None,
     num_samples: int = None
 ):
-    num_samples = 1000 * model.data[0].shape[1]
+    num_samples = min(4096 * model.data[0].shape[1], 32768)
     samples = prior.sample(num_samples)  # [N, D]
     mean, _ = model.predict_f(samples, posterior=posterior)
     return tf.math.reduce_mean(mean)
@@ -442,15 +553,48 @@ def _mmlt_var(
 ):  
     X, Z = model.data
     posterior = model.posterior() if posterior == None else posterior
-    num_samples = 1000 * X.shape[1]
+    num_samples = min(4096 * X.shape[1], 32768)
     samples1 = prior.sample(num_samples)
     samples2 = prior.sample(num_samples)
-    f_mean1, _ = model.predict_g(samples1, posterior=posterior)
-    f_mean2, _ = model.predict_g(samples2, posterior=posterior)
+    f_mean1, _ = model.predict_f(samples1, posterior=posterior)
+    f_mean2, _ = model.predict_f(samples2, posterior=posterior)
     covar_factors = f_mean1 * f_mean2
     cross_cov = tf.linalg.diag_part(kernel.K(samples1, samples2)) - tf.linalg.diag_part(
-        kernel.K(samples1, X) @ posterior.cache[0] @ kernel.K(X, samples2)
+        kernel.K(samples1, X) @ tf.linalg.cholesky_solve(posterior.cache[1], kernel.K(X, samples2))
     )
     integral_var = tf.reduce_sum(covar_factors * tf.math.expm1(cross_cov)) / num_samples
     assert integral_var >= 0
     return integral_var
+
+
+# Uniform Prior, Log-Bezier Process
+@integral_mean.register(
+    tfp.distributions.Uniform,
+    LogBezierProcess,
+    NoneType
+)
+def _LogBez_mean(
+    prior: tfp.distributions.Uniform,
+    model: LogBezierProcess,
+    kernel: NoneType,
+    posterior: gpflow.posteriors.AbstractPosterior = None
+) -> tf.Tensor:
+    #return model.BB.integral()
+    return model.BB.integral_mean()
+
+@integral_variance.register(
+    tfp.distributions.Uniform,
+    LogBezierProcess,
+    NoneType
+)
+def _LogBez_variance(
+    prior: tfp.distributions.Uniform,
+    model: LogBezierProcess,
+    kernel: NoneType,
+    posterior: gpflow.posteriors.AbstractPosterior = None
+) -> tf.Tensor:
+    #import warnings
+    #warnings.warn(f'Integral Variance not implemented for LogBezierProcess')
+    #from numpy import nan
+    #return tf.constant(nan)
+    return model.BB.integral_variance()

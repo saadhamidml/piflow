@@ -3,7 +3,11 @@ from gpflow.base import InputData, MeanAndVariance, RegressionData
 from gpflow.models import GPR
 from gpflow.posteriors import GPRPosterior
 import tensorflow as tf
-from trieste.models.gpflow.models import GaussianProcessRegression
+from trieste.data import Dataset
+from trieste.models.gpflow.models import GaussianProcessRegression as TGaussianProcessRegression
+
+from .transforms import DataTransformMixin
+from .utils import set_model_priors, initialise_hyperparameters
 
 
 class WarpedGPR(GPR):
@@ -75,7 +79,7 @@ class MMLT_GPR(WarpedGPR):
     """Moment matched log transform model."""
 
     def _warp(self, y: tf.Tensor) -> tf.Tensor:
-        return tf.math.log(y) 
+        return tf.math.log(y + 1e-9) 
 
     def predict_f(
         self,
@@ -99,3 +103,28 @@ class MMLT_GPR(WarpedGPR):
         else:
             f_cov = tf.math.expm1(g_var_diag) * f_mean ** 2 
         return f_mean, f_cov 
+
+
+class GaussianProcessRegression(TGaussianProcessRegression):
+    """GPR with automatic hyperparameter setting."""
+
+    def update(self, dataset: Dataset) -> None:
+        """Set the hyperparamter priors and initialise by sampling from
+        these priors and selecting the best.
+        """
+        super().update(dataset)
+        set_model_priors(self.model)
+        initialise_hyperparameters(self.model)  # TODO: Allow configurable num_samples.
+
+
+class _WarpedGaussianProcessRegression(GaussianProcessRegression):
+    """Trieste Model for Warped GPR."""
+
+    def update(self, dataset: Dataset) -> None:
+        self.model.unwarped_Y_data = dataset.observations
+        warped_dataset = Dataset(dataset.query_points, self.model._warp(dataset.observations))
+        super().update(warped_dataset)
+
+
+class WarpedGaussianProcessRegression(DataTransformMixin, _WarpedGaussianProcessRegression):
+    pass

@@ -6,8 +6,9 @@ from trieste.space import Box
 from trieste.objectives.utils import mk_observer
 from trieste.models.gpflow.models import GaussianProcessRegression
 from piflow.acquisition_functions import AcquisitionRule, UncertaintySampling
+from piflow.models.transforms import MinMaxTransformer
 
-from piflow.models import WSABI_L_GPR
+from piflow.models.warped import WSABI_L_GPR, MMLT_GPR, WarpedGaussianProcessRegression
 from piflow.probabilistic_integrator import ProbabilisticIntegrator
 
 # Define problem
@@ -32,8 +33,13 @@ initial_query_points = search_space.sample_sobol(num_initial_points)
 initial_data = observer(initial_query_points)
 
 # Set up the model.
-gpflow_model = WSABI_L_GPR(initial_data.astuple(), kernel=gpflow.kernels.SquaredExponential())
-model = GaussianProcessRegression(gpflow_model)
+X, Y = initial_data.astuple()
+observation_transformer = MinMaxTransformer(Y)
+Y_ = observation_transformer.transform(Y)
+gpflow_model = WSABI_L_GPR((X, Y_), kernel=gpflow.kernels.SquaredExponential())
+model = WarpedGaussianProcessRegression(
+    gpflow_model, observation_transformer=observation_transformer
+)
 
 # Set up the acquisition function.
 acquisition_rule = AcquisitionRule(builder=UncertaintySampling())
