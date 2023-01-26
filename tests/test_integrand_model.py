@@ -8,8 +8,8 @@ from piflow.models import MMLT_GPR, WSABI_L_GPR
 from piflow.probabilistic_integrator import IntegrandModel
 
 
-# @pytest.mark.parametrize('warping', [None, 'WSABI-L', 'MMLT'])
-# @pytest.mark.parametrize('prior_type', ['gaussian', 'uniform'])
+@pytest.mark.parametrize('warping', [None, 'WSABI-L', 'MMLT'])
+@pytest.mark.parametrize('prior_type', ['gaussian', 'uniform'])
 def test_integrand_model(warping: str = None, prior_type: str = 'gaussian'):
     # Generate data from a Gaussian.
     integrand = tfp.distributions.MultivariateNormalFullCovariance(
@@ -61,9 +61,9 @@ def test_integrand_model(warping: str = None, prior_type: str = 'gaussian'):
     tf.debugging.assert_near(true_integral, int_mean)
 
 
-if __name__ == '__main__':
+# if __name__ == '__main__':
     # test_integrand_model(warping=None, prior_type='gaussian')
-    test_integrand_model(warping=None, prior_type='uniform'
+    # test_integrand_model(warping=None, prior_type='uniform')
     # test_integrand_model(warping='WSABI-L', prior_type='gaussian')
     # test_integrand_model(warping='WSABI-L', prior_type='uniform')
     # test_integrand_model(warping='MMLT', prior_type='gaussian')
